@@ -15,40 +15,32 @@ setup() {
   run python3 "${RESOLVE}"
   [ "$status" -eq 0 ]
   [[ "$output" == ok:* ]]
+  [[ "$output" == *"task/handler/meta variable references"* ]]
 }
 
-@test "production defaults test fails when a required default is removed" {
+@test "production defaults test fails when a task-only default is removed" {
   run python3 - "${REPO_ROOT}" <<'PY'
+import importlib.util
 import pathlib
-import subprocess
 import sys
-import tempfile
-import yaml
 
 root = pathlib.Path(sys.argv[1])
-merged = {}
-for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
-    merged.update(yaml.safe_load(path.read_text()) or {})
-for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores"):
-    defaults = root / f"ansible/roles/{role}/defaults/main.yml"
-    if defaults.is_file():
-        merged.update(yaml.safe_load(defaults.read_text()) or {})
-merged.pop("common_nofile_limit", None)
-with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as handle:
-    yaml.safe_dump(merged, handle)
-    vars_path = handle.name
-env = {"ANSIBLE_CONFIG": str(root / "ansible.cfg"), **dict(__import__("os").environ)}
-cmd = [
-    "ansible", "localhost", "-c", "local", "-m", "ansible.builtin.template",
-    "-a", f"src={root}/ansible/roles/common/templates/90-qops-limits.conf.j2 dest=/tmp/qops-limits-test.conf",
-    "-e", f"@{vars_path}",
-]
-result = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=root)
-print(result.stderr.strip() or result.stdout.strip())
-raise SystemExit(result.returncode)
+spec = importlib.util.spec_from_file_location(
+    "resolve_defaults", root / "tests/fixtures/resolve-production-defaults.py"
+)
+resolve = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(resolve)
+merged = resolve.merge_production_defaults()
+merged.pop("common_qops_config_dir", None)
+missing = resolve.unresolved_task_variables(merged)
+if "common_qops_config_dir" in missing:
+    print("unresolved task variable (no production default): common_qops_config_dir")
+    raise SystemExit(1)
+print("unexpectedly resolved task variables without common_qops_config_dir")
+raise SystemExit(0)
 PY
   [ "$status" -ne 0 ]
-  [[ "$output" == *"common_nofile_limit"* ]]
+  [[ "$output" == *"common_qops_config_dir"* ]]
 }
 
 @test "preflight report schema records multiple failures at once" {
@@ -145,10 +137,21 @@ PY
   [ "$output" = "ok" ]
 }
 
-@test "nftables template does not include sandbox internal CIDR host input accepts" {
+@test "nftables template does not widen host input policy for sandbox internal CIDRs" {
   nft_out="${BATS_TMPDIR}/qops-no-internal.nft"
-  "${RENDER}" ansible/roles/host_firewall/templates/qops.nft.j2 "${VARS}" >"${nft_out}"
-  ! grep -q '10.0.0.0/8' "${nft_out}"
+  render_with_defaults ansible/roles/host_firewall/templates/qops.nft.j2 \
+    '{"e2b_allow_sandbox_internal_cidrs":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]}' >"${nft_out}"
+  run python3 - "${nft_out}" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+for cidr in cidrs:
+    assert f"ip saddr {cidr} accept" not in text, cidr
+    assert re.search(rf"saddr\s+{re.escape(cidr)}\s+accept", text) is None, cidr
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }
 
 @test "docker overlap script rejects nested overlap and malformed CIDR" {
@@ -278,4 +281,290 @@ PY
   grep -q '127.0.0.1:4317:4317' "${compose}"
   ! grep -q '0.0.0.0:4317' "${compose}"
   render_with_defaults ansible/roles/e2b_datastores/templates/docker-compose.yml.j2 '{"e2b_datastores_otel_grpc_port":4318}' | grep -q '127.0.0.1:4318:4317'
+  render_with_defaults ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2 '{"e2b_datastores_otel_grpc_port":4320}' | grep -q 'endpoint: 0.0.0.0:4320'
+  render_with_defaults ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2 '{"e2b_datastores_otel_health_port":13134}' | grep -q 'endpoint: 0.0.0.0:13134'
+  render_with_defaults ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2 '{"e2b_datastores_clickhouse_native_port":9001}' | grep -q 'tcp://clickhouse:9001'
+  render_with_defaults ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2 '{"e2b_datastores_clickhouse_db":"metrics"}' | grep -q 'database: metrics'
+}
+
+@test "compose and otel templates derive every image tag port and bind host from variables" {
+  run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" <<'PY'
+import json
+import pathlib
+import subprocess
+import sys
+
+root = pathlib.Path(sys.argv[1])
+tmpdir = pathlib.Path(sys.argv[2])
+render = root / "tests/fixtures/render-template.sh"
+
+def render_template(template_rel: str, extra: dict | None = None) -> str:
+    vars_file = tmpdir / "vars.yml"
+    merged = {}
+    import yaml
+    for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+        merged.update(yaml.safe_load(path.read_text()) or {})
+    for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores"):
+        defaults = root / f"ansible/roles/{role}/defaults/main.yml"
+        if defaults.is_file():
+            merged.update(yaml.safe_load(defaults.read_text()) or {})
+    if extra:
+        merged.update(extra)
+    vars_file.write_text(yaml.safe_dump(merged))
+    return subprocess.check_output(
+        ["bash", str(render), template_rel, str(vars_file)], text=True, cwd=root,
+    )
+
+compose_cases = [
+    ("e2b_postgres_image", {"e2b_postgres_image": "postgres-alt"}, "image: postgres-alt:"),
+    ("e2b_postgres_tag", {"e2b_postgres_tag": "19"}, ":19"),
+    ("e2b_redis_image", {"e2b_redis_image": "redis-alt"}, "image: redis-alt:"),
+    ("e2b_redis_tag", {"e2b_redis_tag": "9"}, ":9"),
+    ("e2b_clickhouse_image", {"e2b_clickhouse_image": "clickhouse/alt"}, "image: clickhouse/alt:"),
+    ("e2b_clickhouse_tag", {"e2b_clickhouse_tag": "26.0.0.0"}, ":26.0.0.0"),
+    ("e2b_otel_collector_image", {"e2b_otel_collector_image": "otel/alt"}, "image: otel/alt:"),
+    ("e2b_otel_collector_tag", {"e2b_otel_collector_tag": "9.9.9"}, ":9.9.9"),
+    ("e2b_datastores_postgres_port", {"e2b_datastores_postgres_port": 5444}, "127.0.0.1:5444:5432"),
+    ("e2b_datastores_redis_port", {"e2b_datastores_redis_port": 6380}, "127.0.0.1:6380:6379"),
+    ("e2b_datastores_clickhouse_http_port", {"e2b_datastores_clickhouse_http_port": 8124}, "127.0.0.1:8124:8123"),
+    ("e2b_datastores_clickhouse_native_port", {"e2b_datastores_clickhouse_native_port": 9001}, "127.0.0.1:9001:9000"),
+    ("e2b_datastores_otel_grpc_port", {"e2b_datastores_otel_grpc_port": 4318}, "127.0.0.1:4318:4317"),
+    ("e2b_datastores_otel_health_port", {"e2b_datastores_otel_health_port": 13134}, "127.0.0.1:13134:13133"),
+    ("e2b_datastores_postgres_bind_host", {"e2b_datastores_postgres_bind_host": "127.0.0.2"}, "127.0.0.2:"),
+]
+
+base_compose = render_template("ansible/roles/e2b_datastores/templates/docker-compose.yml.j2")
+for name, override, needle in compose_cases:
+    out = render_template("ansible/roles/e2b_datastores/templates/docker-compose.yml.j2", override)
+    assert out != base_compose, name
+    assert needle in out, (name, needle)
+
+otel_cases = [
+    ("e2b_datastores_otel_grpc_port", {"e2b_datastores_otel_grpc_port": 4320}, "0.0.0.0:4320"),
+    ("e2b_datastores_otel_health_port", {"e2b_datastores_otel_health_port": 13134}, "0.0.0.0:13134"),
+    ("e2b_datastores_clickhouse_native_port", {"e2b_datastores_clickhouse_native_port": 9001}, "clickhouse:9001"),
+    ("e2b_datastores_clickhouse_db", {"e2b_datastores_clickhouse_db": "metrics"}, "database: metrics"),
+]
+
+base_otel = render_template("ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2")
+for name, override, needle in otel_cases:
+    out = render_template("ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2", override)
+    assert out != base_otel, name
+    assert needle in out, (name, needle)
+
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "verify-fc-artifacts rejects corrupted installed binaries" {
+  archive="${BATS_TMPDIR}/fc-artifacts.tar.gz"
+  bash "${REPO_ROOT}/tests/fixtures/build-fc-artifacts-fixture.sh" \
+    "${archive}" v1.14-0.2.0 vmlinux-test 1.36.1
+  fc_root="${BATS_TMPDIR}/fc"
+  versions="${fc_root}/versions"
+  kernels="${fc_root}/kernels"
+  busybox="${fc_root}/busybox"
+  bash "${REPO_ROOT}/ansible/roles/e2b_host/files/install-fc-artifacts.sh" \
+    "${archive}" "${versions}" "${kernels}" "${busybox}" \
+    v1.14-0.2.0 vmlinux-test 1.36.1
+  run bash "${REPO_ROOT}/ansible/roles/e2b_host/files/verify-fc-artifacts.sh" \
+    "${archive}" "${versions}" "${kernels}" "${busybox}" \
+    v1.14-0.2.0 vmlinux-test 1.36.1
+  [ "$status" -eq 0 ]
+  printf 'corrupted\n' >>"${versions}/v1.14-0.2.0/amd64/firecracker"
+  run bash "${REPO_ROOT}/ansible/roles/e2b_host/files/verify-fc-artifacts.sh" \
+    "${archive}" "${versions}" "${kernels}" "${busybox}" \
+    v1.14-0.2.0 vmlinux-test 1.36.1
+  [ "$status" -ne 0 ]
+}
+
+@test "qops_release_base_url derives from github repository and dist version" {
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+merged = {}
+for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+    merged.update(yaml.safe_load(path.read_text()) or {})
+if merged.get("qops_release_base_url"):
+    effective = merged["qops_release_base_url"]
+else:
+    effective = (
+        f"https://github.com/{merged['qops_github_repository']}/releases/download/"
+        f"e2b-{merged['e2b_dist_version']}"
+    )
+expected = (
+    f"https://github.com/{merged['qops_github_repository']}/releases/download/"
+    f"e2b-{merged['e2b_dist_version']}"
+)
+assert effective == expected, effective
+print(expected)
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "missing FC artifact source fails with explicit operator guidance" {
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+merged = {}
+for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+    merged.update(yaml.safe_load(path.read_text()) or {})
+merged.update(yaml.safe_load((root / "ansible/roles/e2b_host/defaults/main.yml").read_text()) or {})
+merged["qops_release_base_url"] = ""
+merged["qops_github_repository"] = ""
+merged["e2b_host_fc_artifacts_download_url"] = ""
+merged["e2b_host_fc_artifacts_local_path"] = ""
+merged["e2b_host_release_base_url_effective"] = ""
+msg = (
+    "Firecracker artifacts archive not found at /var/cache/qops/e2b-fc-artifacts-"
+    f"{merged['e2b_dist_version']}.tar.gz. "
+    "Provide artifacts via one of: e2b_host_fc_artifacts_local_path (local tarball path), "
+    "e2b_host_fc_artifacts_download_url (full download URL), "
+    "qops_release_base_url (release root URL, no trailing slash), or "
+    "qops_github_repository (owner/name slug; used with e2b_dist_version from versions.yml "
+    "to build https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/...)."
+)
+for token in ("e2b_host_fc_artifacts_local_path", "qops_release_base_url", "qops_github_repository"):
+    assert token in msg, token
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "nftables reload is atomic when ruleset load fails" {
+  good="${BATS_TMPDIR}/qops-good.nft"
+  bad="${BATS_TMPDIR}/qops-bad.nft"
+  render_with_defaults ansible/roles/host_firewall/templates/qops.nft.j2 >"${good}"
+  cp "${good}" "${bad}"
+  printf '\nthis is not valid nft syntax\n' >>"${bad}"
+  sudo /sbin/nft delete table inet qops_filter_test 2>/dev/null || true
+  sudo sed 's/qops_filter/qops_filter_test/g' "${good}" | sudo /sbin/nft -f -
+  sudo /sbin/nft list table inet qops_filter_test >/dev/null
+  run sudo /sbin/nft -f <(sudo sed 's/qops_filter/qops_filter_test/g' "${bad}")
+  [ "$status" -ne 0 ]
+  run sudo /sbin/nft list table inet qops_filter_test
+  [ "$status" -eq 0 ]
+  sudo /sbin/nft delete table inet qops_filter_test 2>/dev/null || true
+}
+
+@test "docker overlap ansible task fails when helper exits non-zero" {
+  playbook="${BATS_TMPDIR}/docker-overlap-fail.yml"
+  cat >"${playbook}" <<EOF
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Validate overlap helper failure fails the play
+      ansible.builtin.command:
+        cmd: python3 ${REPO_ROOT}/ansible/roles/docker/files/cidr-overlaps.py not-a-cidr 10.11.0.0/16
+      register: docker_pool_host_overlap
+      changed_when: false
+      failed_when: >-
+        docker_pool_host_overlap.rc != 0 or
+        (docker_pool_host_overlap.stdout | trim) == 'true'
+EOF
+  run ansible-playbook -i localhost, -c local "${playbook}"
+  [ "$status" -ne 0 ]
+}
+
+@test "clickhouse TTL helper handles missing table, idempotence, updates, and SQL errors" {
+  stub="${REPO_ROOT}/tests/fixtures/stub-docker-compose-clickhouse-ttl.sh"
+  script="${REPO_ROOT}/ansible/roles/e2b_datastores/files/e2b-apply-clickhouse-ttl.sh"
+  compose="${BATS_TMPDIR}/compose.yml"
+  touch "${compose}"
+  stub_bin="${BATS_TMPDIR}/bin"
+  mkdir -p "${stub_bin}"
+  cat >"${stub_bin}/docker" <<EOF
+#!/usr/bin/env bash
+exec env CLICKHOUSE_TTL_STUB_LOG="${BATS_TMPDIR}/ttl.log" bash "${stub}" "\$@"
+EOF
+  chmod +x "${stub_bin}/docker" "${stub}"
+
+  export PATH="${stub_bin}:${PATH}"
+  : >"${BATS_TMPDIR}/ttl.log"
+
+  export TABLE_EXISTS=0
+  run bash "${script}" "${compose}" 30
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"metrics_gauge_local does not exist"* ]]
+
+  export TABLE_EXISTS=1
+  export TTL_GAUGE="toDateTime(TimeUnix) + toIntervalDay(30)"
+  export TTL_SUM="toDateTime(TimeUnix) + toIntervalDay(30)"
+  run bash "${script}" "${compose}" 30
+  [ "$status" -eq 0 ]
+  ! grep -q '^ALTER TABLE' "${BATS_TMPDIR}/ttl.log"
+
+  export TTL_GAUGE="toDateTime(TimeUnix) + toIntervalDay(7)"
+  export TTL_SUM="toDateTime(TimeUnix) + toIntervalDay(7)"
+  : >"${BATS_TMPDIR}/ttl.log"
+  run bash "${script}" "${compose}" 30
+  [ "$status" -eq 0 ]
+  grep -q 'ALTER TABLE metrics_gauge_local' "${BATS_TMPDIR}/ttl.log"
+  grep -q 'ALTER TABLE metrics_sum_local' "${BATS_TMPDIR}/ttl.log"
+
+  export SQL_FAIL="Code: 999. DB::Exception: simulated failure"
+  : >"${BATS_TMPDIR}/ttl.log"
+  run bash "${script}" "${compose}" 30
+  [ "$status" -ne 0 ]
+}
+
+@test "hugepages allocator validates percentage and page size with stubbed proc paths" {
+  script="${REPO_ROOT}/ansible/roles/e2b_host/files/e2b-allocate-hugepages.sh"
+  fake="${BATS_TMPDIR}/proc"
+  mkdir -p "${fake}/sys/vm"
+  cat >"${fake}/meminfo" <<'EOF'
+MemTotal:       32768000 kB
+Hugepagesize:       2048 kB
+EOF
+  echo 0 >"${fake}/sys/vm/nr_hugepages"
+  echo 0 >"${fake}/sys/vm/nr_overcommit_hugepages"
+
+  run env E2B_HUGEPAGES_PERCENTAGE=80 \
+    E2B_HUGEPAGES_MEMINFO="${fake}/meminfo" \
+    E2B_HUGEPAGES_NR_HUGEPAGES="${fake}/sys/vm/nr_hugepages" \
+    E2B_HUGEPAGES_NR_OVERCOMMIT="${fake}/sys/vm/nr_overcommit_hugepages" \
+    bash "${script}"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${fake}/sys/vm/nr_hugepages")" -gt 0 ]]
+
+  cat >"${fake}/meminfo" <<'EOF'
+MemTotal:       32768000 kB
+Hugepagesize:       4096 kB
+EOF
+  run env E2B_HUGEPAGES_PERCENTAGE=80 \
+    E2B_HUGEPAGES_MEMINFO="${fake}/meminfo" \
+    E2B_HUGEPAGES_NR_HUGEPAGES="${fake}/sys/vm/nr_hugepages" \
+    E2B_HUGEPAGES_NR_OVERCOMMIT="${fake}/sys/vm/nr_overcommit_hugepages" \
+    bash "${script}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported Hugepagesize"* ]]
+
+  run env E2B_HUGEPAGES_PERCENTAGE=150 \
+    E2B_HUGEPAGES_MEMINFO="${fake}/meminfo" \
+    E2B_HUGEPAGES_NR_HUGEPAGES="${fake}/sys/vm/nr_hugepages" \
+    E2B_HUGEPAGES_NR_OVERCOMMIT="${fake}/sys/vm/nr_overcommit_hugepages" \
+    bash "${script}"
+  [ "$status" -ne 0 ]
+
+  cat >"${fake}/meminfo" <<'EOF'
+MemTotal:       32768000 kB
+Hugepagesize:       2048 kB
+EOF
+  echo 0 >"${fake}/sys/vm/nr_hugepages"
+  echo 0 >"${fake}/sys/vm/nr_overcommit_hugepages"
+  echo 0 >"${fake}/sys/vm/nr_hugepages_readback"
+  echo 0 >"${fake}/sys/vm/nr_overcommit_readback"
+  run env E2B_HUGEPAGES_PERCENTAGE=80 \
+    E2B_HUGEPAGES_MEMINFO="${fake}/meminfo" \
+    E2B_HUGEPAGES_NR_HUGEPAGES_WRITE="${fake}/sys/vm/nr_hugepages" \
+    E2B_HUGEPAGES_NR_HUGEPAGES_READ="${fake}/sys/vm/nr_hugepages_readback" \
+    E2B_HUGEPAGES_NR_OVERCOMMIT_WRITE="${fake}/sys/vm/nr_overcommit_hugepages" \
+    E2B_HUGEPAGES_NR_OVERCOMMIT_READ="${fake}/sys/vm/nr_overcommit_readback" \
+    bash "${script}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shortfall"* ]]
 }

@@ -22,3 +22,9 @@ e2b_host_orchestrator_subdirs:
   - build
 
 e2b_host_hugepages_service_name: e2b-hugepages.service
+
+# Effective release root for FC artifact downloads (operator override or GitHub default).
+e2b_host_release_base_url_effective: >-
+  {{ qops_release_base_url if (qops_release_base_url | default('') | length > 0)
+     else ('https://github.com/' ~ qops_github_repository ~ '/releases/download/e2b-' ~ e2b_dist_version
+           if (qops_github_repository | default('') | length > 0) else '') }}

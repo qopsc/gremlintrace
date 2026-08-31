@@ -1,6 +1,9 @@
 #!/usr/sbin/nft -f
 # Managed by codereviewer host_firewall role.
-# Replaces only the qops_filter table; Docker and orchestrator tables are untouched.
+# table + delete + replace in one transaction so a load failure keeps prior rules.
+
+table inet {{ host_firewall_nftables_table_name }}
+delete table inet {{ host_firewall_nftables_table_name }}
 
 table inet {{ host_firewall_nftables_table_name }} {
   chain input {

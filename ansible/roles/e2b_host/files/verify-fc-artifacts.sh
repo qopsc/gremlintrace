@@ -11,7 +11,8 @@ KERNEL_VERSION="${6:?kernel version required}"
 BUSYBOX_VERSION="${7:?busybox version required}"
 
 STAGE="$(mktemp -d)"
-trap 'rm -rf "${STAGE}"' EXIT
+CHECKSUMS="$(mktemp)"
+trap 'rm -rf "${STAGE}"; rm -f "${CHECKSUMS}"' EXIT
 
 tar -xzf "${ARCHIVE}" -C "${STAGE}"
 
@@ -27,10 +28,11 @@ done
 
 (
   cd "${STAGE}"
-  while IFS= read -r line; do
+  while IFS= read -r line || [[ -n "${line}" ]]; do
     [[ -n "${line}" ]] || continue
-    sum="${line%% *}"
-    rel="${line#* }"
+    sum="${line%%[[:space:]]*}"
+    rel="${line#"${sum}"}"
+    rel="${rel#"${rel%%[![:space:]]*}"}"
     case "${rel}" in
       firecrackers/*)
         installed="${FC_VERSIONS_DIR}/${rel#firecrackers/}"
@@ -45,8 +47,8 @@ done
         continue
         ;;
     esac
-    [[ -f "${installed}" ]] || exit 1
-    actual="$(sha256sum "${installed}" | awk '{print $1}')"
-    [[ "${actual}" == "${sum}" ]] || exit 1
+    printf '%s  %s\n' "${sum}" "${installed}" >>"${CHECKSUMS}"
   done <SHA256SUMS
 )
+
+sha256sum -c "${CHECKSUMS}"
