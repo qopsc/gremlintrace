@@ -1,0 +1,2 @@
+# Disable inotify watching of change events for NBD devices
+ACTION=="add|change", KERNEL=="nbd*", OPTIONS:="nowatch"

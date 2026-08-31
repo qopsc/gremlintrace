@@ -1,6 +1,130 @@
 ---
-- name: Placeholder for the e2b_datastores role
-  ansible.builtin.debug:
-    msg: "e2b_datastores role is implemented in task 6"
+- name: Load qops secrets for datastore configuration
+  ansible.builtin.slurp:
+    src: "{{ common_qops_secrets_file }}"
+  register: e2b_datastores_secrets_slurp
+  tags:
+    - e2b_datastores
+
+- name: Parse datastore secrets
+  ansible.builtin.set_fact:
+    e2b_datastores_clickhouse_username: >-
+      {{ (e2b_datastores_secrets_slurp.content | b64decode).splitlines()
+         | select('match', '^E2B_CLICKHOUSE_USERNAME=') | first
+         | regex_replace('^E2B_CLICKHOUSE_USERNAME=', '') }}
+    e2b_datastores_clickhouse_password: >-
+      {{ (e2b_datastores_secrets_slurp.content | b64decode).splitlines()
+         | select('match', '^E2B_CLICKHOUSE_PASSWORD=') | first
+         | regex_replace('^E2B_CLICKHOUSE_PASSWORD=', '') }}
+  no_log: true
+  tags:
+    - e2b_datastores
+
+- name: Ensure e2b-data compose directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ e2b_datastores_compose_dir }}"
+    - "{{ e2b_datastores_postgres_init_dir }}"
+    - "{{ e2b_datastores_clickhouse_init_dir }}"
+  tags:
+    - e2b_datastores
+
+- name: Render postgres init SQL
+  ansible.builtin.template:
+    src: postgres-init.sql.j2
+    dest: "{{ e2b_datastores_postgres_init_dir }}/01-init.sql"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_datastores
+
+- name: Render ClickHouse TTL SQL
+  ansible.builtin.template:
+    src: clickhouse-ttl.sql.j2
+    dest: "{{ e2b_datastores_clickhouse_init_dir }}/01-ttl.sql"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_datastores
+
+- name: Render otel-collector configuration
+  ansible.builtin.template:
+    src: otel-collector.yaml.j2
+    dest: "{{ e2b_datastores_otel_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_datastores
+
+- name: Render e2b-data docker compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ e2b_datastores_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_datastores
+
+- name: Install ClickHouse TTL helper
+  ansible.builtin.copy:
+    src: e2b-apply-clickhouse-ttl.sh
+    dest: /usr/local/lib/qops/e2b-apply-clickhouse-ttl.sh
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - e2b_datastores
+
+- name: Start e2b-data compose stack and wait for health
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name {{ e2b_datastores_compose_project }}
+      --env-file {{ common_qops_secrets_file }}
+      -f {{ e2b_datastores_compose_file }}
+      up -d --wait
+  register: e2b_datastores_compose_up
+  changed_when: >-
+    'Created' in e2b_datastores_compose_up.stdout or
+    'Started' in e2b_datastores_compose_up.stdout or
+    'Recreated' in e2b_datastores_compose_up.stdout
+  tags:
+    - e2b_datastores
+
+- name: Apply ClickHouse metrics TTL when tables already exist
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-apply-clickhouse-ttl.sh
+      {{ e2b_datastores_compose_file }}
+      {{ e2b_datastores_clickhouse_init_dir }}/01-ttl.sql
+  register: e2b_datastores_ttl_apply
+  changed_when: e2b_datastores_ttl_apply.rc == 0 and e2b_datastores_ttl_apply.stdout != ""
+  failed_when: false
+  tags:
+    - e2b_datastores
+
+- name: Ensure postgres extensions exist on running cluster
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name {{ e2b_datastores_compose_project }}
+      --env-file {{ common_qops_secrets_file }}
+      -f {{ e2b_datastores_compose_file }}
+      exec -T postgres
+      psql -U {{ e2b_datastores_postgres_user }} -d {{ e2b_datastores_postgres_db }}
+      -v ON_ERROR_STOP=1
+      -c "CREATE SCHEMA IF NOT EXISTS extensions;"
+      -c "CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;"
+  register: e2b_datastores_pg_ext
+  changed_when: "'CREATE' in e2b_datastores_pg_ext.stdout"
   tags:
     - e2b_datastores

@@ -1,6 +1,275 @@
 ---
-- name: Placeholder for the e2b_host role
-  ansible.builtin.debug:
-    msg: "e2b_host role is implemented in task 6"
+- name: Deploy nbd module configuration
+  ansible.builtin.template:
+    src: modprobe-nbd.conf.j2
+    dest: /etc/modprobe.d/nbd.conf
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_host
+
+- name: Ensure nbd module loads at boot
+  ansible.builtin.template:
+    src: modules-load-nbd.conf.j2
+    dest: /etc/modules-load.d/qops-nbd.conf
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_host
+
+- name: Load nbd module with configured device count
+  community.general.modprobe:
+    name: nbd
+    params: "nbds_max={{ e2b_host_nbd_max }}"
+    state: present
+  failed_when: false
+  tags:
+    - e2b_host
+
+- name: Deploy udev rule for nbd devices
+  ansible.builtin.template:
+    src: 97-nbd-device.rules.j2
+    dest: /etc/udev/rules.d/97-nbd-device.rules
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload udev rules
+  tags:
+    - e2b_host
+
+- name: Ensure orchestrator mount point exists
+  ansible.builtin.file:
+    path: "{{ e2b_host_orchestrator_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_host
+
+- name: Create orchestrator subdirectories
+  ansible.builtin.file:
+    path: "{{ e2b_host_orchestrator_root }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ e2b_host_orchestrator_subdirs }}"
+  tags:
+    - e2b_host
+
+- name: Format orchestrator data device when needed
+  community.general.filesystem:
+    fstype: xfs
+    dev: "{{ e2b_data_device }}"
+    force: false
+  when: e2b_data_device | length > 0
+  tags:
+    - e2b_host
+
+- name: Mount orchestrator data device
+  ansible.posix.mount:
+    path: "{{ e2b_host_orchestrator_root }}"
+    src: "{{ e2b_data_device }}"
+    fstype: xfs
+    opts: defaults,nofail
+    state: mounted
+  when: e2b_data_device | length > 0
+  tags:
+    - e2b_host
+
+- name: Ensure hugetlbfs mount point exists
+  ansible.builtin.file:
+    path: "{{ e2b_host_hugepages_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_host
+
+- name: Mount hugetlbfs
+  ansible.posix.mount:
+    path: "{{ e2b_host_hugepages_mount }}"
+    src: none
+    fstype: hugetlbfs
+    opts: defaults,nofail
+    state: mounted
+  tags:
+    - e2b_host
+
+- name: Check whether swapfile already exists
+  ansible.builtin.stat:
+    path: "{{ e2b_host_swapfile_path }}"
+  register: e2b_host_swapfile_stat
+  tags:
+    - e2b_host
+
+- name: Allocate swapfile
+  ansible.builtin.command:
+    cmd: fallocate -l {{ e2b_host_swapfile_size_mb }}M {{ e2b_host_swapfile_path }}
+    creates: "{{ e2b_host_swapfile_path }}"
+  when: not e2b_host_swapfile_stat.stat.exists
+  tags:
+    - e2b_host
+
+- name: Set swapfile permissions
+  ansible.builtin.file:
+    path: "{{ e2b_host_swapfile_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  tags:
+    - e2b_host
+
+- name: Initialize swapfile when needed
+  ansible.builtin.command:
+    cmd: mkswap {{ e2b_host_swapfile_path }}
+  register: e2b_host_mkswap
+  changed_when: "'Setting up swapspace' in e2b_host_mkswap.stdout"
+  failed_when: >-
+    e2b_host_mkswap.rc != 0 and 'busy' not in (e2b_host_mkswap.stderr | lower)
+    and 'already' not in (e2b_host_mkswap.stderr | lower)
+  when: not e2b_host_swapfile_stat.stat.exists or e2b_host_swapfile_stat.stat.size == 0
+  tags:
+    - e2b_host
+
+- name: Enable swapfile
+  ansible.posix.mount:
+    path: "{{ e2b_host_swapfile_path }}"
+    src: "{{ e2b_host_swapfile_path }}"
+    fstype: swap
+    opts: sw,nofail
+    state: present
+  tags:
+    - e2b_host
+
+- name: Ensure Firecracker support directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ e2b_host_fc_versions_dir }}"
+    - "{{ e2b_host_fc_kernels_dir }}"
+    - "{{ e2b_host_fc_busybox_dir }}"
+    - "{{ e2b_host_fc_envd_dir }}"
+    - /fc-vm
+  tags:
+    - e2b_host
+
+- name: Install hugepages allocator script
+  ansible.builtin.copy:
+    src: e2b-allocate-hugepages.sh
+    dest: /usr/local/lib/qops/e2b-allocate-hugepages.sh
+    mode: "0755"
+    owner: root
+    group: root
+  notify: Restart e2b hugepages service
+  tags:
+    - e2b_host
+
+- name: Install e2b-hugepages systemd unit
+  ansible.builtin.template:
+    src: e2b-hugepages.service.j2
+    dest: "/etc/systemd/system/{{ e2b_host_hugepages_service_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart e2b hugepages service
+  tags:
+    - e2b_host
+
+- name: Enable e2b-hugepages service
+  ansible.builtin.service:
+    name: "{{ e2b_host_hugepages_service_name }}"
+    enabled: true
+    state: started
+  tags:
+    - e2b_host
+
+- name: Install Firecracker artifact installer script
+  ansible.builtin.copy:
+    src: install-fc-artifacts.sh
+    dest: /usr/local/lib/qops/install-fc-artifacts.sh
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - e2b_host
+
+- name: Ensure artifact cache directory exists
+  ansible.builtin.file:
+    path: "{{ e2b_host_fc_artifacts_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_host
+
+- name: Determine local Firecracker artifacts archive path
+  ansible.builtin.set_fact:
+    e2b_host_fc_artifacts_archive_path: >-
+      {{ e2b_host_fc_artifacts_local_path if (e2b_host_fc_artifacts_local_path | length > 0)
+         else (e2b_host_fc_artifacts_cache_dir ~ '/e2b-fc-artifacts-' ~ e2b_dist_version ~ '.tar.gz') }}
+  tags:
+    - e2b_host
+
+- name: Download Firecracker artifacts archive when configured
+  ansible.builtin.get_url:
+    url: "{{ e2b_host_fc_artifacts_download_url }}"
+    dest: "{{ e2b_host_fc_artifacts_archive_path }}"
+    mode: "0644"
+    force: false
+  when:
+    - e2b_host_fc_artifacts_local_path | length == 0
+    - e2b_host_fc_artifacts_download_url | length > 0
+  tags:
+    - e2b_host
+
+- name: Assert Firecracker artifacts archive is available
+  ansible.builtin.stat:
+    path: "{{ e2b_host_fc_artifacts_archive_path }}"
+  register: e2b_host_fc_archive_stat
+  tags:
+    - e2b_host
+
+- name: Fail when Firecracker artifacts archive is missing
+  ansible.builtin.fail:
+    msg: >-
+      Firecracker artifacts archive not found at {{ e2b_host_fc_artifacts_archive_path }}.
+      Set e2b_host_fc_artifacts_local_path or e2b_host_fc_artifacts_download_url.
+  when: not e2b_host_fc_archive_stat.stat.exists
+  tags:
+    - e2b_host
+
+- name: Check whether Firecracker artifacts are already installed
+  ansible.builtin.stat:
+    path: >-
+      {{ e2b_host_fc_versions_dir }}/{{ firecracker_version }}/amd64/firecracker
+  register: e2b_host_fc_installed_stat
+  tags:
+    - e2b_host
+
+- name: Install Firecracker artifacts from archive
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/install-fc-artifacts.sh
+      {{ e2b_host_fc_artifacts_archive_path }}
+      {{ e2b_host_fc_versions_dir }}
+      {{ e2b_host_fc_kernels_dir }}
+      {{ e2b_host_fc_busybox_dir }}
+      {{ firecracker_version }}
+      {{ kernel_version }}
+      {{ busybox_version }}
+  when: not e2b_host_fc_installed_stat.stat.exists
+  changed_when: not e2b_host_fc_installed_stat.stat.exists
   tags:
     - e2b_host

@@ -1,0 +1,15 @@
+[Unit]
+Description=Allocate E2B hugetlbfs pages
+DefaultDependencies=no
+Before=docker.service
+After=local-fs.target
+ConditionPathIsMountPoint={{ e2b_host_hugepages_mount }}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=E2B_HUGEPAGES_PERCENTAGE={{ e2b_hugepages_percentage }}
+ExecStart=/usr/local/lib/qops/e2b-allocate-hugepages.sh
+
+[Install]
+WantedBy=multi-user.target

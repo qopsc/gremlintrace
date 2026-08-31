@@ -1,0 +1,41 @@
+---
+preflight_report_path: /etc/qops/preflight.json
+preflight_schema_version: 1
+
+preflight_min_vcpus: 8
+preflight_min_ram_mb: 32768
+preflight_min_disk_gb: 200
+
+preflight_min_glibc_version: "2.36"
+preflight_min_kernel_version: "6.1"
+
+preflight_qops_marker_dir: /etc/qops
+preflight_allowed_port_80_units:
+  - traefik.service
+preflight_allowed_port_443_units:
+  - traefik.service
+preflight_allowed_port_22_units:
+  - ssh.service
+  - sshd.service
+  - ssh.socket
+  - sshd.socket
+
+preflight_egress_urls_debian:
+  - "https://download.docker.com/linux/ubuntu/dists/"
+  - "https://ghcr.io/"
+  - "https://registry-1.docker.io/v2/"
+  - "https://bun.sh/"
+  - "https://registry.npmjs.org/"
+preflight_egress_urls_fedora:
+  - "https://download.docker.com/linux/fedora/"
+  - "https://ghcr.io/"
+  - "https://registry-1.docker.io/v2/"
+  - "https://bun.sh/"
+  - "https://registry.npmjs.org/"
+
+preflight_dns_api_host: "api.e2b.{{ qops_domain }}"
+preflight_dns_random_label: "preflight-check"
+preflight_dns_random_host: "{{ preflight_dns_random_label }}.e2b.{{ qops_domain }}"
+
+preflight_orchestrator_root: /orchestrator
+preflight_data_path_default: /var/lib/e2b

@@ -1,0 +1,18 @@
+---
+- name: Apply qops sysctl settings
+  ansible.builtin.command:
+    cmd: sysctl --system
+  changed_when: false
+  listen: Apply qops sysctl settings
+
+- name: Restart systemd-journald
+  ansible.builtin.service:
+    name: systemd-journald
+    state: restarted
+  listen: Restart systemd-journald
+
+- name: Restart chrony
+  ansible.builtin.service:
+    name: "{{ (ansible_os_family == 'Debian') | ternary('chrony', 'chronyd') }}"
+    state: restarted
+  listen: Restart chrony
