@@ -10,6 +10,7 @@ setup() {
   mkdir -p "${STUB_BIN}"
 
   export BOOTSTRAP_STUB_LOG="${TEST_TMPDIR}/ansible-playbook.log"
+  export BOOTSTRAP_ORDER_LOG="${TEST_TMPDIR}/order.log"
   cp "${BATS_TEST_DIRNAME}/helpers/ansible-playbook" "${STUB_BIN}/ansible-playbook"
   chmod +x "${STUB_BIN}/ansible-playbook"
 

@@ -4,6 +4,20 @@
   become: true
   vars_files:
     - ../../versions.yml
-    - ../../group_vars/all.yml
+    - ../group_vars/all.yml
+  pre_tasks:
+    - name: Verify operator and pin variables resolve from vars_files
+      ansible.builtin.assert:
+        that:
+          - tls_mode is defined
+          - tls_mode in ['acme_dns', 'provided', 'internal_ca']
+          - kodus_image_tag is defined
+          - kodus_image_tag != 'latest'
+        fail_msg: >-
+          vars_files did not load group_vars/all.yml and/or versions.yml
+          (tls_mode={{ tls_mode | default('UNDEF') }},
+          kodus_image_tag={{ kodus_image_tag | default('UNDEF') }})
+      tags:
+        - always
   roles:
     - role: doctor

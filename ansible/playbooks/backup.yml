@@ -5,7 +5,7 @@
   become: true
   vars_files:
     - ../../versions.yml
-    - ../../group_vars/all.yml
+    - ../group_vars/all.yml
   tasks:
     - name: Backup placeholder
       ansible.builtin.debug:

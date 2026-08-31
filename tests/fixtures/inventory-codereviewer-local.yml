@@ -1,0 +1,8 @@
+---
+# Local inventory for bats: places localhost in codereviewer so playbooks match hosts.
+all:
+  children:
+    codereviewer:
+      hosts:
+        localhost:
+          ansible_connection: local

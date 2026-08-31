@@ -4,7 +4,7 @@
   become: true
   vars_files:
     - ../../versions.yml
-    - ../../group_vars/all.yml
+    - ../group_vars/all.yml
   roles:
     - role: preflight
     - role: common

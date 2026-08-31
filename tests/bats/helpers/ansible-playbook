@@ -1,5 +1,8 @@
 #!/bin/bash
-# Stub ansible-playbook: record argv to BOOTSTRAP_STUB_LOG and exit 0.
+# Stub ansible-playbook: record argv and append to order log.
 LOG_FILE="${BOOTSTRAP_STUB_LOG:?BOOTSTRAP_STUB_LOG not set}"
+if [[ -n "${BOOTSTRAP_ORDER_LOG:-}" ]]; then
+  printf 'ansible-playbook\n' >>"${BOOTSTRAP_ORDER_LOG}"
+fi
 printf '%s\n' "$0" "$@" >"${LOG_FILE}"
 exit 0
