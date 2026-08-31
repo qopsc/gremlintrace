@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the preflight role
+  ansible.builtin.debug:
+    msg: "preflight role is implemented in task 5"
+  tags:
+    - preflight

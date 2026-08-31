@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the e2b_datastores role
+  ansible.builtin.debug:
+    msg: "e2b_datastores role is implemented in task 6"
+  tags:
+    - e2b_datastores

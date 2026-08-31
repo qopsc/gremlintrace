@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: QuantumOps
+  description: "qops-backup timer, qops-e2b-gc, optional off-box backup targets."
+  license: proprietary
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+dependencies: []

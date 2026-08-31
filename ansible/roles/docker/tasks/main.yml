@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the docker role
+  ansible.builtin.debug:
+    msg: "docker role is implemented in task 5"
+  tags:
+    - docker

@@ -1,0 +1,13 @@
+---
+# Implemented in M2: qops-backup timer and on-demand backup playbook.
+- name: Codereviewer backup
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+  tasks:
+    - name: Backup placeholder
+      ansible.builtin.debug:
+        msg: "backup.yml is implemented in M2"
+      tags:
+        - backup

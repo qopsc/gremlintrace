@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the host_firewall role
+  ansible.builtin.debug:
+    msg: "host_firewall role is implemented in task 5"
+  tags:
+    - host_firewall

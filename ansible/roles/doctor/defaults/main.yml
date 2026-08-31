@@ -1,0 +1,3 @@
+---
+doctor_qops_doctor_script: /usr/local/bin/qops-doctor
+doctor_preflight_report: /etc/qops/preflight.json

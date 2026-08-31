@@ -1,0 +1,13 @@
+---
+# Implemented in Task 11: remove services, nftables, E2B runtime state, and Kodus compose stack.
+- name: Codereviewer uninstall
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+  tasks:
+    - name: Uninstall placeholder
+      ansible.builtin.debug:
+        msg: "uninstall.yml is implemented in Task 11"
+      tags:
+        - uninstall

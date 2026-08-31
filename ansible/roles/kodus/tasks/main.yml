@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the kodus role
+  ansible.builtin.debug:
+    msg: "kodus role is implemented in task 9"
+  tags:
+    - kodus

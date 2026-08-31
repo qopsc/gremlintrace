@@ -1,0 +1,8 @@
+---
+- name: Codereviewer health check
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+  roles:
+    - role: doctor

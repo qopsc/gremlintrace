@@ -1,0 +1,4 @@
+---
+traefik_install_dir: /usr/local/bin
+traefik_config_dir: /etc/traefik
+traefik_dynamic_config_dir: /etc/traefik/dynamic

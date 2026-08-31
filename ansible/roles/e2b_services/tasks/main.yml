@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the e2b_services role
+  ansible.builtin.debug:
+    msg: "e2b_services role is implemented in task 7"
+  tags:
+    - e2b_services
