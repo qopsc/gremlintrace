@@ -49,5 +49,8 @@ goose_version: "v3.27.2"
 # Node.js major version for E2B template build step on the host.
 node_version: "22"
 
+# E2B JS SDK used by e2b/templates (exact version; e2b/templates/package.json must match).
+e2b_sdk_version: "2.46.1"
+
 # @kodus/kodus-graph pre-baked in sandbox templates (optional); Kodus installs at runtime if omitted.
 kodus_graph_version: "0.3.0"
