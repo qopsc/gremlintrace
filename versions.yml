@@ -61,6 +61,10 @@ actionlint_sha256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e
 ansible_core_version: "2.21.3"
 ansible_lint_version: "26.8.0"
 yamllint_version: "1.38.0"
+
+# Required directly by ci/check_workflow_job_deps.py. Build and mirror jobs
+# deliberately have no PyYAML dependency; ci/yaml_versions.py is stdlib-only.
+pyyaml_version: "6.0.1"
 shellcheck_apt_version: "0.9.0-1"
 bats_apt_version: "1.10.0-1"
 node_ci_version: "22.22.2"

@@ -67,20 +67,17 @@ trap cleanup EXIT
 yaml_get() {
   local file="$1"
   local key="$2"
-  python3 -c '
-import sys
-import yaml
+  local helper="${REPO_ROOT}/ci/yaml_versions.py"
+  local value
 
-path, key = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as fh:
-    data = yaml.safe_load(fh)
-if not isinstance(data, dict) or key not in data:
-    raise SystemExit(f"missing key {key!r} in {path}")
-val = data[key]
-if val is None or str(val).strip() == "":
-    raise SystemExit(f"empty key {key!r} in {path}")
-print(val)
-' "${file}" "${key}"
+  [[ -n "${file}" && -f "${file}" ]] || die "versions file not found: ${file}"
+  [[ -f "${helper}" ]] || die "yaml_versions helper not found: ${helper}"
+
+  if ! value="$(python3 "${helper}" get "${key}" "${file}" 2>&1)"; then
+    die "${value}"
+  fi
+  [[ -n "${value}" ]] || die "empty value for ${key} in ${file}"
+  printf '%s\n' "${value}"
 }
 
 load_versions() {
