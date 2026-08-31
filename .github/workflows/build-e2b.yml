@@ -1,0 +1,129 @@
+---
+name: Build E2B dist
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - versions.yml
+      - e2b/**
+      - .github/workflows/build-e2b.yml
+  pull_request:
+    paths:
+      - versions.yml
+      - e2b/**
+      - .github/workflows/build-e2b.yml
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    runs-on: ubuntu-24.04
+    outputs:
+      e2b_pin: ${{ steps.load.outputs.e2b_pin }}
+      e2b_dist_version: ${{ steps.load.outputs.e2b_dist_version }}
+      e2b_go_version: ${{ steps.load.outputs.e2b_go_version }}
+      firecracker_version: ${{ steps.load.outputs.firecracker_version }}
+      kernel_version: ${{ steps.load.outputs.kernel_version }}
+      busybox_version: ${{ steps.load.outputs.busybox_version }}
+      envd_version: ${{ steps.load.outputs.envd_version }}
+      e2b_postgres_image: ${{ steps.load.outputs.e2b_postgres_image }}
+      e2b_postgres_tag: ${{ steps.load.outputs.e2b_postgres_tag }}
+      e2b_redis_image: ${{ steps.load.outputs.e2b_redis_image }}
+      e2b_redis_tag: ${{ steps.load.outputs.e2b_redis_tag }}
+      e2b_clickhouse_image: ${{ steps.load.outputs.e2b_clickhouse_image }}
+      e2b_clickhouse_tag: ${{ steps.load.outputs.e2b_clickhouse_tag }}
+      e2b_otel_collector_image: ${{ steps.load.outputs.e2b_otel_collector_image }}
+      e2b_otel_collector_tag: ${{ steps.load.outputs.e2b_otel_collector_tag }}
+      kodus_installer_ref: ${{ steps.load.outputs.kodus_installer_ref }}
+      kodus_image_tag: ${{ steps.load.outputs.kodus_image_tag }}
+      traefik_version: ${{ steps.load.outputs.traefik_version }}
+      goose_version: ${{ steps.load.outputs.goose_version }}
+      node_version: ${{ steps.load.outputs.node_version }}
+      e2b_sdk_version: ${{ steps.load.outputs.e2b_sdk_version }}
+      kodus_graph_version: ${{ steps.load.outputs.kodus_graph_version }}
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Load versions.yml
+        id: load
+        run: |
+          python3 -m pip install --disable-pip-version-check -q pyyaml
+          python3 ci/load-versions.py versions.yml
+
+  build-dist:
+    needs: versions
+    runs-on: ubuntu-24.04
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build dist tarball
+        run: ./e2b/build/build.sh
+      - name: Validate dist tarball
+        env:
+          E2B_DIST_VERSION: ${{ needs.versions.outputs.e2b_dist_version }}
+        run: ./ci/validate-e2b-dist.sh --tarball "e2b/build/dist/e2b-${E2B_DIST_VERSION}.tar.gz"
+      # actions/upload-artifact v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: e2b-dist
+          path: e2b/build/dist/
+          if-no-files-found: error
+
+  mirror-artifacts:
+    needs: versions
+    runs-on: ubuntu-24.04
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Mirror Firecracker, kernel, and busybox
+        run: ./ci/mirror-e2b-artifacts.sh --out artifacts
+      # actions/upload-artifact v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: e2b-mirrored-artifacts
+          path: artifacts/
+          if-no-files-found: error
+
+  publish-release:
+    if: github.event_name == 'workflow_dispatch'
+    needs:
+      - versions
+      - build-dist
+      - mirror-artifacts
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      # actions/download-artifact v4.1.9
+      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806
+        with:
+          name: e2b-dist
+          path: release/dist
+      # actions/download-artifact v4.1.9
+      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806
+        with:
+          name: e2b-mirrored-artifacts
+          path: release/artifacts
+      - name: Stage release assets
+        env:
+          E2B_DIST_VERSION: ${{ needs.versions.outputs.e2b_dist_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/upload
+          cp "release/dist/e2b-${E2B_DIST_VERSION}.tar.gz" release/upload/
+          cp -a release/artifacts/. release/upload/
+      - name: Publish GitHub Release
+        env:
+          E2B_DIST_VERSION: ${{ needs.versions.outputs.e2b_dist_version }}
+        # softprops/action-gh-release v2.2.0
+        uses: softprops/action-gh-release@7b4da11513bf3f43f9999e90eabced41ab8bb048
+        with:
+          tag_name: e2b-${{ env.E2B_DIST_VERSION }}
+          name: E2B dist ${{ env.E2B_DIST_VERSION }}
+          files: release/upload/**
+          fail_on_unmatched_files: true
+          generate_release_notes: true

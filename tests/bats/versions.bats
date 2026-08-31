@@ -30,7 +30,8 @@ required = [
     'e2b_clickhouse_image', 'e2b_clickhouse_tag',
     'e2b_otel_collector_image', 'e2b_otel_collector_tag',
     'kodus_installer_ref', 'kodus_image_tag',
-    'traefik_version', 'goose_version', 'node_version', 'kodus_graph_version',
+    'traefik_version', 'goose_version', 'node_version', 'e2b_sdk_version',
+    'kodus_graph_version',
 ]
 with open('${VERSIONS_FILE}') as f:
     data = yaml.safe_load(f)
@@ -84,6 +85,24 @@ if not re.fullmatch(r'[0-9a-f]{40}', pin):
 print(pin)
 "
   [ "$status" -eq 0 ]
+}
+
+@test "e2b/templates package.json e2b version matches versions.yml e2b_sdk_version" {
+  run python3 -c "
+import json
+import yaml
+from pathlib import Path
+root = Path('${REPO_ROOT}')
+versions = yaml.safe_load((root / 'versions.yml').read_text())['e2b_sdk_version']
+pkg = json.loads((root / 'e2b/templates/package.json').read_text())
+dep = pkg['dependencies']['e2b']
+if dep != versions:
+    print(f'mismatch: package.json={dep!r} versions.yml={versions!r}')
+    raise SystemExit(1)
+print('match')
+"
+  [ "$status" -eq 0 ]
+  [ "$output" = "match" ]
 }
 
 @test "e2b_dist_version equals first 7 characters of e2b_pin" {
