@@ -1,4 +1,9 @@
 ---
+common_qops_config_dir: /etc/qops
+common_qops_secrets_file: /etc/qops/secrets.env
+common_qops_backup_dir: /var/backups/qops
+common_e2b_lib_dir: /var/lib/e2b
+
 common_packages_debian:
   - iptables
   - nftables

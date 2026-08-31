@@ -1,4 +1,6 @@
 ---
+docker_daemon_config_path: /etc/docker/daemon.json
+
 docker_address_pools:
   - base: 10.20.0.0/16
     size: 24

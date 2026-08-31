@@ -12,7 +12,7 @@ services:
     ports:
       - "{{ e2b_datastores_postgres_bind_host }}:{{ e2b_datastores_postgres_port }}:5432/tcp"
     volumes:
-      - e2b-postgres-data:/var/lib/postgresql/data
+      - e2b-postgres-data:/var/lib/postgresql
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U {{ e2b_datastores_postgres_user }}"]
@@ -39,8 +39,10 @@ services:
     image: {{ e2b_clickhouse_image }}:{{ e2b_clickhouse_tag }}
     container_name: e2b-data-clickhouse
     restart: unless-stopped
+    env_file:
+      - {{ common_qops_secrets_file }}
     environment:
-      CLICKHOUSE_USER: {{ e2b_datastores_clickhouse_username }}
+      CLICKHOUSE_USER: ${E2B_CLICKHOUSE_USERNAME}
       CLICKHOUSE_PASSWORD: ${E2B_CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DB: {{ e2b_datastores_clickhouse_db }}
     ports:
@@ -48,7 +50,6 @@ services:
       - "{{ e2b_datastores_clickhouse_bind_host }}:{{ e2b_datastores_clickhouse_native_port }}:9000/tcp"
     volumes:
       - e2b-clickhouse-data:/var/lib/clickhouse
-      - ./clickhouse-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8123/ping | grep -q Ok"]
       interval: 5s
@@ -60,6 +61,8 @@ services:
     container_name: e2b-data-otel-collector
     restart: unless-stopped
     command: ["--config=/etc/otel-collector.yaml"]
+    env_file:
+      - {{ common_qops_secrets_file }}
     depends_on:
       clickhouse:
         condition: service_healthy

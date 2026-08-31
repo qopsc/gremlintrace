@@ -17,20 +17,28 @@ Host prep for Firecracker: nbd, hugetlbfs, swap, `/orchestrator`, and mirrored F
 
 `e2b-hugepages.service` (before `docker.service`) runs `/usr/local/lib/qops/e2b-allocate-hugepages.sh` with `E2B_HUGEPAGES_PERCENTAGE` from `e2b_hugepages_percentage` (default **80**).
 
-After reserving normal RAM (same algorithm as upstream `init-client.sh`), the script sets:
+After reserving normal RAM (upstream `init-client.sh` algorithm), the script sets:
 
 - `vm.nr_hugepages` = `percentage`% of the computable hugepage count (permanent pool)
 - `vm.nr_overcommit_hugepages` = `(100 - percentage)`% (overcommit pool)
 
-Re-runs are deterministic: the same inputs write the same sysctl values.
+Page size is read from `/proc/meminfo` `Hugepagesize`. The script reads back both sysctls and fails on allocation shortfall. **Re-run determinism on a live host is unverified** (fragmentation can reduce what the kernel grants).
+
+## Orchestrator storage
+
+- `e2b_data_device` set: XFS formatted (if needed) and mounted at `/orchestrator` with `nofail`.
+- No device: `/var/lib/e2b/orchestrator` bind-mounted to `/orchestrator` with `bind,nofail`.
+
+Subdirectories are created **after** the mount is in place.
 
 ## Firecracker artifacts
 
 Source (first match):
 
-1. `e2b_host_fc_artifacts_local_path` — pre-staged `e2b-fc-artifacts-<e2b_dist_version>.tar.gz`
-2. `e2b_host_fc_artifacts_download_url` — downloaded to `/var/cache/qops/`
+1. `e2b_host_fc_artifacts_local_path` — pre-staged archive
+2. `qops_release_base_url` + `/e2b-fc-artifacts-<e2b_dist_version>.tar.gz`
+3. `e2b_host_fc_artifacts_download_url`
 
-Tarball layout matches CI (`firecrackers/`, `kernels/`, `busybox/`, inner `SHA256SUMS`). Install is skipped when `firecracker` already exists at the pinned version path.
+`verify-fc-artifacts.sh` checks all three binaries against the archive `SHA256SUMS` before skipping install.
 
 Implemented in **Task 6** (see `../../../docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md`, Phase 2).

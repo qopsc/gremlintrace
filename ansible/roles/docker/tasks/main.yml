@@ -6,7 +6,9 @@
       {{ item.base }} {{ sandbox_host_cidr }}
   register: docker_pool_host_overlap
   changed_when: false
-  failed_when: docker_pool_host_overlap.stdout | trim == 'true'
+  failed_when: >-
+    docker_pool_host_overlap.rc != 0 or
+    (docker_pool_host_overlap.stdout | trim) == 'true'
   loop: "{{ docker_address_pools }}"
   loop_control:
     label: "{{ item.base }}"
@@ -20,7 +22,9 @@
       {{ item.base }} {{ sandbox_vrt_cidr }}
   register: docker_pool_vrt_overlap
   changed_when: false
-  failed_when: docker_pool_vrt_overlap.stdout | trim == 'true'
+  failed_when: >-
+    docker_pool_vrt_overlap.rc != 0 or
+    (docker_pool_vrt_overlap.stdout | trim) == 'true'
   loop: "{{ docker_address_pools }}"
   loop_control:
     label: "{{ item.base }}"

@@ -1,13 +1,12 @@
 ---
-# Fixture variables for offline template rendering tests.
+# Role templates for ansible-roles.bats only.
+# Production defaults are validated separately by resolve-production-defaults.py.
 qops_domain: fixture.example.com
 e2b_hugepages_percentage: 75
 e2b_clickhouse_retention_days: 14
 e2b_data_device: ""
 sandbox_host_cidr: 10.11.0.0/16
 sandbox_vrt_cidr: 10.12.0.0/16
-e2b_allow_sandbox_internal_cidrs:
-  - 10.0.0.0/8
 firecracker_version: v1.14-0.2.0
 kernel_version: vmlinux-6.1.158-c1a568c
 busybox_version: "1.36.1"
@@ -20,6 +19,8 @@ e2b_clickhouse_tag: 25.8.30.16
 e2b_otel_collector_image: otel/opentelemetry-collector-contrib
 e2b_otel_collector_tag: 0.146.0
 e2b_dist_version: "6e4ce14"
+common_qops_config_dir: /etc/qops
+common_qops_secrets_file: /etc/qops/secrets.env
 common_sysctl_settings:
   vm.swappiness: 10
   vm.vfs_cache_pressure: 50
@@ -40,6 +41,7 @@ docker_address_pools:
     size: 24
 docker_log_max_size: 100m
 docker_log_max_file: "3"
+docker_daemon_config_path: /etc/docker/daemon.json
 e2b_datastores_compose_project: e2b-data
 e2b_datastores_postgres_bind_host: 127.0.0.1
 e2b_datastores_postgres_port: 5433
@@ -51,8 +53,6 @@ e2b_datastores_clickhouse_bind_host: 127.0.0.1
 e2b_datastores_clickhouse_http_port: 8123
 e2b_datastores_clickhouse_native_port: 9000
 e2b_datastores_clickhouse_db: default
-e2b_datastores_clickhouse_username: e2b
-e2b_datastores_clickhouse_password: test-clickhouse-password
 e2b_datastores_otel_bind_host: 127.0.0.1
 e2b_datastores_otel_grpc_port: 4317
 e2b_datastores_otel_health_port: 13133
@@ -61,3 +61,4 @@ e2b_host_hugepages_mount: /mnt/hugepages
 e2b_host_hugepages_service_name: e2b-hugepages.service
 e2b_host_nbd_max: 4096
 host_firewall_nftables_config_path: /etc/nftables/qops.nft
+host_firewall_nftables_table_name: qops_filter

@@ -19,6 +19,13 @@
   tags:
     - preflight
 
+- name: Generate per-run wildcard DNS probe label
+  ansible.builtin.set_fact:
+    preflight_dns_random_label_runtime: >-
+      {{ lookup('ansible.builtin.password', '/dev/null chars=ascii_lowercase,digits length=16') }}
+  tags:
+    - preflight
+
 - name: Run preflight checks
   ansible.builtin.command:
     cmd: /usr/local/lib/qops/run-preflight.sh
@@ -30,10 +37,11 @@
     PREFLIGHT_MIN_DISK_GB: "{{ preflight_min_disk_gb | string }}"
     PREFLIGHT_MIN_GLIBC: "{{ preflight_min_glibc_version }}"
     PREFLIGHT_MIN_KERNEL: "{{ preflight_min_kernel_version }}"
-    PREFLIGHT_DATA_PATH: "{{ (e2b_data_device | length > 0) | ternary(e2b_data_device, preflight_orchestrator_root) }}"
+    PREFLIGHT_DATA_PATH: >-
+      {{ e2b_data_device if (e2b_data_device | length > 0) else preflight_orchestrator_root }}
     PREFLIGHT_QOPS_DOMAIN: "{{ qops_domain }}"
     PREFLIGHT_DNS_API_HOST: "{{ preflight_dns_api_host }}"
-    PREFLIGHT_DNS_RANDOM_HOST: "{{ preflight_dns_random_host }}"
+    PREFLIGHT_DNS_RANDOM_HOST: "{{ preflight_dns_random_label_runtime }}.e2b.{{ qops_domain }}"
     PREFLIGHT_QOPS_MARKER_DIR: "{{ preflight_qops_marker_dir }}"
     PREFLIGHT_ALLOWED_PORT_22_UNITS: "{{ preflight_allowed_port_22_units | join(',') }}"
     PREFLIGHT_ALLOWED_PORT_80_UNITS: "{{ preflight_allowed_port_80_units | join(',') }}"

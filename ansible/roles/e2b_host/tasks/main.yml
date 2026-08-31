@@ -10,9 +10,9 @@
     - e2b_host
 
 - name: Ensure nbd module loads at boot
-  ansible.builtin.template:
-    src: modules-load-nbd.conf.j2
+  ansible.builtin.copy:
     dest: /etc/modules-load.d/qops-nbd.conf
+    content: "nbd\n"
     owner: root
     group: root
     mode: "0644"
@@ -24,7 +24,6 @@
     name: nbd
     params: "nbds_max={{ e2b_host_nbd_max }}"
     state: present
-  failed_when: false
   tags:
     - e2b_host
 
@@ -39,6 +38,15 @@
   tags:
     - e2b_host
 
+- name: Format orchestrator data device when needed
+  community.general.filesystem:
+    fstype: xfs
+    dev: "{{ e2b_data_device }}"
+    force: false
+  when: e2b_data_device | length > 0
+  tags:
+    - e2b_host
+
 - name: Ensure orchestrator mount point exists
   ansible.builtin.file:
     path: "{{ e2b_host_orchestrator_root }}"
@@ -46,26 +54,6 @@
     owner: root
     group: root
     mode: "0755"
-  tags:
-    - e2b_host
-
-- name: Create orchestrator subdirectories
-  ansible.builtin.file:
-    path: "{{ e2b_host_orchestrator_root }}/{{ item }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-  loop: "{{ e2b_host_orchestrator_subdirs }}"
-  tags:
-    - e2b_host
-
-- name: Format orchestrator data device when needed
-  community.general.filesystem:
-    fstype: xfs
-    dev: "{{ e2b_data_device }}"
-    force: false
-  when: e2b_data_device | length > 0
   tags:
     - e2b_host
 
@@ -77,6 +65,39 @@
     opts: defaults,nofail
     state: mounted
   when: e2b_data_device | length > 0
+  tags:
+    - e2b_host
+
+- name: Ensure orchestrator backing directory exists when no dedicated device
+  ansible.builtin.file:
+    path: "{{ e2b_host_orchestrator_disk_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: e2b_data_device | length == 0
+  tags:
+    - e2b_host
+
+- name: Bind-mount orchestrator backing directory
+  ansible.posix.mount:
+    path: "{{ e2b_host_orchestrator_root }}"
+    src: "{{ e2b_host_orchestrator_disk_path }}"
+    fstype: none
+    opts: bind,nofail
+    state: mounted
+  when: e2b_data_device | length == 0
+  tags:
+    - e2b_host
+
+- name: Create orchestrator subdirectories
+  ansible.builtin.file:
+    path: "{{ e2b_host_orchestrator_root }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ e2b_host_orchestrator_subdirs }}"
   tags:
     - e2b_host
 
@@ -136,13 +157,13 @@
   tags:
     - e2b_host
 
-- name: Enable swapfile
+- name: Enable and activate swapfile
   ansible.posix.mount:
-    path: "{{ e2b_host_swapfile_path }}"
+    path: none
     src: "{{ e2b_host_swapfile_path }}"
     fstype: swap
     opts: sw,nofail
-    state: present
+    state: mounted
   tags:
     - e2b_host
 
@@ -194,13 +215,16 @@
   tags:
     - e2b_host
 
-- name: Install Firecracker artifact installer script
+- name: Install Firecracker artifact scripts
   ansible.builtin.copy:
-    src: install-fc-artifacts.sh
-    dest: /usr/local/lib/qops/install-fc-artifacts.sh
+    src: "{{ item }}"
+    dest: "/usr/local/lib/qops/{{ item }}"
     mode: "0755"
     owner: root
     group: root
+  loop:
+    - install-fc-artifacts.sh
+    - verify-fc-artifacts.sh
   tags:
     - e2b_host
 
@@ -214,7 +238,7 @@
   tags:
     - e2b_host
 
-- name: Determine local Firecracker artifacts archive path
+- name: Resolve Firecracker artifacts archive path
   ansible.builtin.set_fact:
     e2b_host_fc_artifacts_archive_path: >-
       {{ e2b_host_fc_artifacts_local_path if (e2b_host_fc_artifacts_local_path | length > 0)
@@ -222,15 +246,25 @@
   tags:
     - e2b_host
 
-- name: Download Firecracker artifacts archive when configured
+- name: Resolve Firecracker artifacts download URL
+  ansible.builtin.set_fact:
+    e2b_host_fc_artifacts_effective_url: >-
+      {{ e2b_host_fc_artifacts_download_url if (e2b_host_fc_artifacts_download_url | length > 0)
+         else (qops_release_base_url ~ '/e2b-fc-artifacts-' ~ e2b_dist_version ~ '.tar.gz'
+               if (qops_release_base_url | length > 0 and e2b_host_fc_artifacts_local_path | length == 0)
+               else '') }}
+  tags:
+    - e2b_host
+
+- name: Download Firecracker artifacts archive
   ansible.builtin.get_url:
-    url: "{{ e2b_host_fc_artifacts_download_url }}"
+    url: "{{ e2b_host_fc_artifacts_effective_url }}"
     dest: "{{ e2b_host_fc_artifacts_archive_path }}"
     mode: "0644"
     force: false
   when:
     - e2b_host_fc_artifacts_local_path | length == 0
-    - e2b_host_fc_artifacts_download_url | length > 0
+    - e2b_host_fc_artifacts_effective_url | length > 0
   tags:
     - e2b_host
 
@@ -245,16 +279,25 @@
   ansible.builtin.fail:
     msg: >-
       Firecracker artifacts archive not found at {{ e2b_host_fc_artifacts_archive_path }}.
-      Set e2b_host_fc_artifacts_local_path or e2b_host_fc_artifacts_download_url.
+      Set qops_release_base_url, e2b_host_fc_artifacts_download_url, or e2b_host_fc_artifacts_local_path.
   when: not e2b_host_fc_archive_stat.stat.exists
   tags:
     - e2b_host
 
-- name: Check whether Firecracker artifacts are already installed
-  ansible.builtin.stat:
-    path: >-
-      {{ e2b_host_fc_versions_dir }}/{{ firecracker_version }}/amd64/firecracker
-  register: e2b_host_fc_installed_stat
+- name: Verify installed Firecracker artifacts
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/verify-fc-artifacts.sh
+      {{ e2b_host_fc_artifacts_archive_path }}
+      {{ e2b_host_fc_versions_dir }}
+      {{ e2b_host_fc_kernels_dir }}
+      {{ e2b_host_fc_busybox_dir }}
+      {{ firecracker_version }}
+      {{ kernel_version }}
+      {{ busybox_version }}
+  register: e2b_host_fc_verify
+  changed_when: false
+  failed_when: false
   tags:
     - e2b_host
 
@@ -269,7 +312,23 @@
       {{ firecracker_version }}
       {{ kernel_version }}
       {{ busybox_version }}
-  when: not e2b_host_fc_installed_stat.stat.exists
-  changed_when: not e2b_host_fc_installed_stat.stat.exists
+  when: e2b_host_fc_verify.rc != 0
+  register: e2b_host_fc_install
+  changed_when: e2b_host_fc_install.rc == 0
+  tags:
+    - e2b_host
+
+- name: Fail when Firecracker artifacts could not be verified after install
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/verify-fc-artifacts.sh
+      {{ e2b_host_fc_artifacts_archive_path }}
+      {{ e2b_host_fc_versions_dir }}
+      {{ e2b_host_fc_kernels_dir }}
+      {{ e2b_host_fc_busybox_dir }}
+      {{ firecracker_version }}
+      {{ kernel_version }}
+      {{ busybox_version }}
+  changed_when: false
   tags:
     - e2b_host

@@ -2,7 +2,7 @@ receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: {{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_grpc_port }}
+        endpoint: 0.0.0.0:{{ e2b_datastores_otel_grpc_port }}
         max_recv_msg_size_mib: 100
         read_buffer_size: 10943040
         max_concurrent_streams: 200
@@ -23,7 +23,7 @@ processors:
 
 extensions:
   health_check:
-    endpoint: {{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_health_port }}
+    endpoint: 0.0.0.0:{{ e2b_datastores_otel_health_port }}
 
 exporters:
   debug:
@@ -31,8 +31,8 @@ exporters:
   clickhouse:
     endpoint: tcp://clickhouse:{{ e2b_datastores_clickhouse_native_port }}
     database: {{ e2b_datastores_clickhouse_db }}
-    username: {{ e2b_datastores_clickhouse_username }}
-    password: {{ e2b_datastores_clickhouse_password }}
+    username: ${env:E2B_CLICKHOUSE_USERNAME}
+    password: ${env:E2B_CLICKHOUSE_PASSWORD}
     async_insert: true
     create_schema: false
     metrics_tables:
@@ -52,7 +52,7 @@ service:
               otlp:
                 protocol: grpc
                 insecure: true
-                endpoint: {{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_grpc_port }}
+                endpoint: 127.0.0.1:{{ e2b_datastores_otel_grpc_port }}
   extensions:
     - health_check
   pipelines:
