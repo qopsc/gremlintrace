@@ -66,5 +66,10 @@ kodus_telemetry_disabled: false
 kodus_license_key: ""
 
 # HTTPS base URL for release asset downloads (no trailing slash).
-# Example: https://github.com/org/codereviewer/releases/download/e2b-6e4ce14
+# Leave empty to derive from qops_github_repository and e2b_dist_version in versions.yml.
+# Example override: https://github.com/org/codereviewer/releases/download/e2b-6e4ce14
 qops_release_base_url: ""
+
+# GitHub repository slug (owner/name) hosting codereviewer releases. Used when
+# qops_release_base_url is empty. Override when installing from a fork or mirror.
+qops_github_repository: "org/codereviewer"

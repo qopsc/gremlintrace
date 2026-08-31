@@ -250,8 +250,8 @@
   ansible.builtin.set_fact:
     e2b_host_fc_artifacts_effective_url: >-
       {{ e2b_host_fc_artifacts_download_url if (e2b_host_fc_artifacts_download_url | length > 0)
-         else (qops_release_base_url ~ '/e2b-fc-artifacts-' ~ e2b_dist_version ~ '.tar.gz'
-               if (qops_release_base_url | length > 0 and e2b_host_fc_artifacts_local_path | length == 0)
+         else (e2b_host_release_base_url_effective ~ '/e2b-fc-artifacts-' ~ e2b_dist_version ~ '.tar.gz'
+               if (e2b_host_release_base_url_effective | length > 0 and e2b_host_fc_artifacts_local_path | length == 0)
                else '') }}
   tags:
     - e2b_host
@@ -279,7 +279,11 @@
   ansible.builtin.fail:
     msg: >-
       Firecracker artifacts archive not found at {{ e2b_host_fc_artifacts_archive_path }}.
-      Set qops_release_base_url, e2b_host_fc_artifacts_download_url, or e2b_host_fc_artifacts_local_path.
+      Provide artifacts via one of: e2b_host_fc_artifacts_local_path (local tarball path),
+      e2b_host_fc_artifacts_download_url (full download URL),
+      qops_release_base_url (release root URL, no trailing slash), or
+      qops_github_repository (owner/name slug; used with e2b_dist_version from versions.yml
+      to build https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/...).
   when: not e2b_host_fc_archive_stat.stat.exists
   tags:
     - e2b_host
