@@ -16,8 +16,8 @@ firecracker_version: "v1.14-0.2.0"
 kernel_version: "vmlinux-6.1.158-c1a568c"
 busybox_version: "1.36.1"
 
-# Stamped into BUILD_INFO by the E2B build pipeline; upgrade.yml reads it to decide template rebuilds.
-envd_version: null
+# From upstream packages/envd/pkg/version.go at e2b_pin (also stamped into BUILD_INFO by the build pipeline).
+envd_version: "0.7.0"
 
 e2b_postgres_image: "postgres"
 e2b_postgres_tag: "18"
@@ -43,8 +43,8 @@ traefik_version: "v3.3.4"
 
 # Toolchain -------------------------------------------------------------------
 
-# goose migration tool built into the E2B dist tarball.
-goose_version: "v3.27.3"
+# goose migration tool built into the E2B dist tarball (packages/db/go.mod at e2b_pin).
+goose_version: "v3.27.2"
 
 # Node.js major version for E2B template build step on the host.
 node_version: "22"

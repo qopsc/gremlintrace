@@ -4,5 +4,6 @@
   become: true
   vars_files:
     - ../../versions.yml
+    - ../../group_vars/all.yml
   roles:
     - role: doctor

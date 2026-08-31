@@ -111,6 +111,23 @@ install_pipx() {
   esac
 }
 
+pipx_bin_dir() {
+  local dir=""
+  if command -v pipx >/dev/null 2>&1; then
+    dir="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || true)"
+  fi
+  if [[ -z "${dir}" ]]; then
+    dir="${HOME}/.local/bin"
+  fi
+  printf '%s\n' "${dir}"
+}
+
+prepend_pipx_bin_to_path() {
+  local bin_dir
+  bin_dir="$(pipx_bin_dir)"
+  export PATH="${bin_dir}:${PATH}"
+}
+
 ensure_ansible() {
   if command -v ansible-playbook >/dev/null 2>&1; then
     return 0
@@ -122,13 +139,18 @@ ensure_ansible() {
     install_pipx
   fi
   pipx ensurepath
-  if ! command -v pipx >/dev/null 2>&1; then
-    export PATH="${HOME}/.local/bin:${PATH}"
+  prepend_pipx_bin_to_path
+  if command -v ansible-playbook >/dev/null 2>&1; then
+    return 0
   fi
-  pipx install --include-deps ansible
-  if ! command -v ansible-playbook >/dev/null 2>&1; then
-    export PATH="${HOME}/.local/bin:${PATH}"
+  if ! pipx install --include-deps ansible; then
+    prepend_pipx_bin_to_path
+    if command -v ansible-playbook >/dev/null 2>&1; then
+      return 0
+    fi
+    die "pipx install ansible failed and ansible-playbook is still not on PATH"
   fi
+  prepend_pipx_bin_to_path
   command -v ansible-playbook >/dev/null 2>&1 || die "ansible-playbook still not on PATH after pipx install"
 }
 

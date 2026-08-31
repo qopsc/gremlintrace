@@ -3,6 +3,7 @@
 setup() {
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   VERSIONS_FILE="${REPO_ROOT}/versions.yml"
+  E2B_PIN_FILE="${REPO_ROOT}/e2b/e2b.pin"
 }
 
 @test "versions.yml parses as YAML" {
@@ -54,4 +55,47 @@ print(tag)
 "
   [ "$status" -eq 0 ]
   [ "$output" != "latest" ]
+}
+
+@test "e2b.pin matches versions.yml e2b_pin" {
+  run python3 -c "
+import re
+import yaml
+from pathlib import Path
+root = Path('${REPO_ROOT}')
+pin_file = (root / 'e2b/e2b.pin').read_text().strip()
+versions_pin = yaml.safe_load((root / 'versions.yml').read_text())['e2b_pin']
+if pin_file != versions_pin:
+    print(f'mismatch: pin={pin_file!r} versions={versions_pin!r}')
+    raise SystemExit(1)
+print('match')
+"
+  [ "$status" -eq 0 ]
+  [ "$output" = "match" ]
+}
+
+@test "e2b_pin is 40 lowercase hex characters" {
+  run python3 -c "
+import re
+import yaml
+pin = yaml.safe_load(open('${VERSIONS_FILE}'))['e2b_pin']
+if not re.fullmatch(r'[0-9a-f]{40}', pin):
+    raise SystemExit(1)
+print(pin)
+"
+  [ "$status" -eq 0 ]
+}
+
+@test "e2b_dist_version equals first 7 characters of e2b_pin" {
+  run python3 -c "
+import yaml
+data = yaml.safe_load(open('${VERSIONS_FILE}'))
+pin = data['e2b_pin']
+dist = data['e2b_dist_version']
+if dist != pin[:7]:
+    print(f'mismatch: dist={dist!r} pin[:7]={pin[:7]!r}')
+    raise SystemExit(1)
+print(dist)
+"
+  [ "$status" -eq 0 ]
 }

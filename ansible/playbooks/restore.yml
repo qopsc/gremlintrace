@@ -5,6 +5,7 @@
   become: true
   vars_files:
     - ../../versions.yml
+    - ../../group_vars/all.yml
   tasks:
     - name: Restore placeholder
       ansible.builtin.debug:

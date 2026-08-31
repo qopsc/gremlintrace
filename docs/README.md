@@ -8,6 +8,8 @@ Operator and developer documentation for codereviewer.
 | `operations.md` | Task 13 / M2 |
 | `security.md` | Task 13 |
 | `spike-notes.md` | Phase 0 (manual) |
-| `distro-notes/` | M2 |
+| `distro-notes/` | M1/M2 per-distro matrix legs |
 
 Authoritative design spec: `superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md`.
+
+**Version pinning exception:** `min_ansible_version` in each role's `meta/main.yml` is a Galaxy compatibility floor (`2.16`, tested on Ansible 2.21.x in dev/CI), not an artifact pin — all deployable version pins live in `versions.yml`.

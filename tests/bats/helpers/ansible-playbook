@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Stub ansible-playbook: record argv to BOOTSTRAP_STUB_LOG and exit 0.
 LOG_FILE="${BOOTSTRAP_STUB_LOG:?BOOTSTRAP_STUB_LOG not set}"
 printf '%s\n' "$0" "$@" >"${LOG_FILE}"

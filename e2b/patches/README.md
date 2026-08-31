@@ -1,5 +1,9 @@
 # E2B upstream patches
 
+## `e2b.pin` mirror
+
+`e2b/e2b.pin` duplicates `versions.yml:e2b_pin` so the build container can read a plain SHA without parsing YAML. **`versions.yml` is authoritative**; `tests/bats/versions.bats` asserts `e2b.pin` stays in sync.
+
 Patches in this directory are applied with `git apply` in CI against the pinned upstream checkout (`e2b/e2b.pin` / `versions.yml:e2b_pin`), in **lexical filename order**.
 
 ## Naming convention

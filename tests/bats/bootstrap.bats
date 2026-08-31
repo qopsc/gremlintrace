@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+load "${BATS_TEST_DIRNAME}/helpers/common.bash"
+
 setup() {
   TEST_TMPDIR="$(mktemp -d)"
   export TEST_TMPDIR
@@ -17,7 +19,7 @@ setup() {
 }
 
 teardown() {
-  rm -rf "${TEST_TMPDIR}"
+  /bin/rm -rf "${TEST_TMPDIR}"
 }
 
 @test "--help exits 0 and prints usage" {
@@ -33,33 +35,41 @@ teardown() {
   [[ "$output" == *"unknown option"* ]]
 }
 
-@test "default invocation calls ansible-playbook with site.yml and default inventory" {
+@test "default invocation calls ansible-playbook with exact argv" {
   run "${BOOTSTRAP}" --skip-install
   [ "$status" -eq 0 ]
-  [ -f "${BOOTSTRAP_STUB_LOG}" ]
-  mapfile -t argv <"${BOOTSTRAP_STUB_LOG}"
-  [ "${#argv[@]}" -ge 4 ]
-  [[ "${argv[0]}" == *"ansible-playbook" ]]
-  [[ "${argv[1]}" == *"ansible/playbooks/site.yml" ]]
-  [ "${argv[2]}" = "-i" ]
-  [[ "${argv[3]}" == *"ansible/inventory/example.yml" ]]
+  assert_argv_equals \
+    "${STUB_BIN}/ansible-playbook" \
+    "${REPO_ROOT}/ansible/playbooks/site.yml" \
+    "-i" \
+    "${REPO_ROOT}/ansible/inventory/example.yml"
 }
 
-@test "--syntax-check forwards --syntax-check to ansible-playbook" {
+@test "--syntax-check forwards exact argv" {
   run "${BOOTSTRAP}" --skip-install --syntax-check
   [ "$status" -eq 0 ]
-  mapfile -t argv <"${BOOTSTRAP_STUB_LOG}"
-  found=false
-  for arg in "${argv[@]}"; do
-    if [[ "${arg}" == "--syntax-check" ]]; then
-      found=true
-      break
-    fi
-  done
-  [ "${found}" = true ]
+  assert_argv_equals \
+    "${STUB_BIN}/ansible-playbook" \
+    "${REPO_ROOT}/ansible/playbooks/site.yml" \
+    "-i" \
+    "${REPO_ROOT}/ansible/inventory/example.yml" \
+    "--syntax-check"
 }
 
-@test "--check --limit --tags and repeated -e are forwarded" {
+@test "--inventory and --playbook forward exact argv" {
+  INV="${TEST_TMPDIR}/custom inventory/example.yml"
+  mkdir -p "$(dirname "${INV}")"
+  cp "${REPO_ROOT}/ansible/inventory/example.yml" "${INV}"
+  run "${BOOTSTRAP}" --skip-install --playbook doctor --inventory "${INV}"
+  [ "$status" -eq 0 ]
+  assert_argv_equals \
+    "${STUB_BIN}/ansible-playbook" \
+    "${REPO_ROOT}/ansible/playbooks/doctor.yml" \
+    "-i" \
+    "${INV}"
+}
+
+@test "--check --limit --tags and repeated -e forward exact argv in order" {
   run "${BOOTSTRAP}" --skip-install \
     --check \
     --limit "myhost" \
@@ -67,16 +77,16 @@ teardown() {
     -e "foo=bar" \
     -e "baz=qux"
   [ "$status" -eq 0 ]
-  mapfile -t argv <"${BOOTSTRAP_STUB_LOG}"
-  joined="${argv[*]}"
-  [[ "${joined}" == *"--check"* ]]
-  [[ "${joined}" == *"--limit"* ]]
-  [[ "${joined}" == *"myhost"* ]]
-  [[ "${joined}" == *"--tags"* ]]
-  [[ "${joined}" == *"docker,kodus"* ]]
-  [[ "${joined}" == *"--extra-vars"* ]]
-  [[ "${joined}" == *"foo=bar"* ]]
-  [[ "${joined}" == *"baz=qux"* ]]
+  assert_argv_equals \
+    "${STUB_BIN}/ansible-playbook" \
+    "${REPO_ROOT}/ansible/playbooks/site.yml" \
+    "-i" \
+    "${REPO_ROOT}/ansible/inventory/example.yml" \
+    "--limit" "myhost" \
+    "--tags" "docker,kodus" \
+    "--check" \
+    "--extra-vars" "foo=bar" \
+    "--extra-vars" "baz=qux"
 }
 
 @test "--skip-install without ansible-playbook exits non-zero with helpful message" {

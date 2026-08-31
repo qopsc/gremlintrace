@@ -8,19 +8,30 @@ Traefik (systemd, the **only** service binding `0.0.0.0:80/443`) terminates TLS 
 
 See the [design spec](docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md) for the full topology.
 
+## What works today (M1 skeleton)
+
+| Verified on this machine | Not yet implemented |
+|---|---|
+| `make check` (yamllint, ansible-lint, shellcheck, syntax-check, bats) | Role tasks (all placeholders) |
+| `./bootstrap.sh --syntax-check` / `--check` wiring to Ansible | Actual install against a target host |
+| `group_vars/all.yml` loaded via explicit `vars_files` | E2B build pipeline, templates, Traefik, Kodus |
+| Stubbed `bootstrap.sh` flag forwarding and pipx install-path tests | Container-based bootstrap install test (written, **skipped** when Docker absent) |
+
+**Roles are placeholders** — `./bootstrap.sh` (without `--syntax-check`) would invoke Ansible but perform no real provisioning until Tasks 5–11 land.
+
 ## Quickstart
 
 From a clean checkout on an x86_64 Linux control host:
 
 ```bash
-# Validate playbooks (no target host required)
+# Validate playbook wiring (no target host, no provisioning)
 ./bootstrap.sh --syntax-check
 
-# Full install (after configuring ansible/inventory/example.yml)
-./bootstrap.sh
+# After configuring ansible/inventory/example.yml and implementing roles:
+# ./bootstrap.sh
 ```
 
-`bootstrap.sh` installs Ansible via `pipx` when missing, then runs `ansible/playbooks/site.yml`.
+`bootstrap.sh` can install Ansible via `pipx` when missing (see `tests/bats/bootstrap-install-path.bats`). For lab SSH without host-key prompts: `export ANSIBLE_HOST_KEY_CHECKING=False`.
 
 ## Repository layout
 
@@ -36,7 +47,7 @@ tests/                # bats + fixtures
 
 ## Pinning policy
 
-All image tags, git refs, and binary versions live in **`versions.yml`**. Nothing else in the repo may hard-code versions. `kodus_image_tag` is never `latest`. E2B upstream changes go only through `e2b/patches/`.
+All image tags, git refs, and binary versions live in **`versions.yml`**. Nothing else in the repo may hard-code versions. `kodus_image_tag` is never `latest`. E2B upstream changes go only through `e2b/patches/`. `e2b/e2b.pin` mirrors `e2b_pin` for the build container; `tests/bats/versions.bats` keeps them aligned.
 
 ## Development
 
@@ -45,10 +56,6 @@ make check    # lint + bats
 make lint     # yamllint, ansible-lint, shellcheck, syntax-check
 make test     # bats only
 ```
-
-## Status
-
-This repository is under active development (Milestone 1). Roles are placeholders until their implementing tasks land; only syntax-check and unit tests have been run in CI-less dev environments.
 
 ## Documentation
 

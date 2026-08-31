@@ -5,7 +5,7 @@ galaxy_info:
     Hard-fail host validation (arch, KVM, cgroup v2, systemd, glibc, kernel/nbd,
     resources, ports, DNS, egress).
   license: proprietary
-  min_ansible_version: "2.14"
+  min_ansible_version: "2.16"
   platforms:
     - name: Ubuntu
       versions:
