@@ -64,3 +64,7 @@ kodus_telemetry_disabled: false
 # Optional Kodus license key (community edition leaves empty).
 # Set via vault or /etc/qops/secrets.env.
 kodus_license_key: ""
+
+# HTTPS base URL for release asset downloads (no trailing slash).
+# Example: https://github.com/org/codereviewer/releases/download/e2b-6e4ce14
+qops_release_base_url: ""

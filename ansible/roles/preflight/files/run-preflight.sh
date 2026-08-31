@@ -12,7 +12,6 @@ MIN_KERNEL="${PREFLIGHT_MIN_KERNEL:-6.1}"
 DATA_PATH="${PREFLIGHT_DATA_PATH:-/var/lib/e2b}"
 QOPS_DOMAIN="${PREFLIGHT_QOPS_DOMAIN:-example.com}"
 DNS_API_HOST="${PREFLIGHT_DNS_API_HOST:-api.e2b.${QOPS_DOMAIN}}"
-DNS_RANDOM_HOST="${PREFLIGHT_DNS_RANDOM_HOST:-preflight-check.e2b.${QOPS_DOMAIN}}"
 QOPS_MARKER_DIR="${PREFLIGHT_QOPS_MARKER_DIR:-/etc/qops}"
 ALLOWED_PORT_22_UNITS="${PREFLIGHT_ALLOWED_PORT_22_UNITS:-ssh.service,sshd.service,ssh.socket,sshd.socket}"
 ALLOWED_PORT_80_UNITS="${PREFLIGHT_ALLOWED_PORT_80_UNITS:-traefik.service}"
@@ -196,7 +195,8 @@ check_hugetlbfs() {
 }
 
 check_resources() {
-  local vcpus ram_mb disk_gb passed=true msg_parts=() details=()
+  local vcpus ram_mb disk_bytes passed=true msg_parts=() details=()
+  local min_disk_bytes=$((MIN_DISK_GB * 1024 * 1024 * 1024))
 
   vcpus="$(nproc --all 2>/dev/null || echo 0)"
   if (( vcpus < MIN_VCPUS )); then
@@ -212,16 +212,28 @@ check_resources() {
   fi
   details+=("\"ram_mb\":${ram_mb}")
 
-  mkdir -p "${DATA_PATH}" 2>/dev/null || true
-  disk_gb="$(df -BG --output=avail "${DATA_PATH}" 2>/dev/null | tail -n1 | tr -dc '0-9' || true)"
-  if ! [[ "${disk_gb}" =~ ^[0-9]+$ ]]; then
-    disk_gb=0
+  if [[ -b "${DATA_PATH}" ]]; then
+    disk_bytes="$(lsblk -b -dn -o SIZE "${DATA_PATH}" 2>/dev/null | head -n1 | tr -dc '0-9' || true)"
+    if ! [[ "${disk_bytes}" =~ ^[0-9]+$ ]]; then
+      disk_bytes=0
+    fi
+    if (( disk_bytes < min_disk_bytes )); then
+      passed=false
+      msg_parts+=("need >= ${MIN_DISK_GB} GiB on block device ${DATA_PATH} (found $((disk_bytes / 1024 / 1024 / 1024)) GiB)")
+    fi
+    details+=("\"disk_bytes\":${disk_bytes},\"data_path\":\"${DATA_PATH}\",\"data_path_type\":\"block\"")
+  else
+    mkdir -p "${DATA_PATH}" 2>/dev/null || true
+    disk_bytes="$(df -B1 --output=avail "${DATA_PATH}" 2>/dev/null | tail -n1 | tr -dc '0-9' || true)"
+    if ! [[ "${disk_bytes}" =~ ^[0-9]+$ ]]; then
+      disk_bytes=0
+    fi
+    if (( disk_bytes < min_disk_bytes )); then
+      passed=false
+      msg_parts+=("need >= ${MIN_DISK_GB} GiB free on ${DATA_PATH} (found $((disk_bytes / 1024 / 1024 / 1024)) GiB)")
+    fi
+    details+=("\"disk_bytes_free\":${disk_bytes},\"data_path\":\"${DATA_PATH}\",\"data_path_type\":\"path\"")
   fi
-  if (( disk_gb < MIN_DISK_GB )); then
-    passed=false
-    msg_parts+=("need >= ${MIN_DISK_GB} GiB free on ${DATA_PATH} (found ${disk_gb})")
-  fi
-  details+=("\"disk_gb_free\":${disk_gb},\"data_path\":\"${DATA_PATH}\"")
 
   local msg
   if [[ "${passed}" == true ]]; then
@@ -305,9 +317,9 @@ PY
 }
 
 check_dns() {
-  local host_ips passed=true msg_parts=() host
+  local host_ips passed=true msg_parts=() host random_host="${PREFLIGHT_DNS_RANDOM_HOST}"
   host_ips="$(host_ips)"
-  for host in "${DNS_API_HOST}" "${DNS_RANDOM_HOST}"; do
+  for host in "${DNS_API_HOST}" "${random_host}"; do
     local addrs
     addrs="$(getent ahosts "${host}" 2>/dev/null | awk '{print $1}' | sort -u | paste -sd, - || true)"
     if [[ -z "${addrs}" ]]; then
@@ -333,11 +345,28 @@ PY
     msg="$(IFS='; '; echo "${msg_parts[*]}"). Configure api.e2b.${QOPS_DOMAIN} and *.e2b.${QOPS_DOMAIN} to point at this host."
   fi
   add_check "dns" "E2B DNS" "${passed}" "${msg}" \
-    "{\"api_host\":\"${DNS_API_HOST}\",\"random_host\":\"${DNS_RANDOM_HOST}\",\"host_ips\":${host_ips}}"
+    "{\"api_host\":\"${DNS_API_HOST}\",\"random_host\":\"${random_host}\",\"host_ips\":${host_ips}}"
+}
+
+url_reachable() {
+  local url="$1" code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -L -X GET "${url}" 2>/dev/null || echo 000)"
+  case "${url}" in
+    *registry-1.docker.io/v2*)
+      [[ "${code}" == "401" || "${code}" == "200" ]] && return 0
+      ;;
+    *ghcr.io*)
+      [[ "${code}" == "200" || "${code}" == "301" || "${code}" == "302" || "${code}" == "308" ]] && return 0
+      ;;
+    *)
+      [[ "${code}" =~ ^[23] ]] && return 0
+      ;;
+  esac
+  return 1
 }
 
 check_egress() {
-  local url passed=true msg_parts=()
+  local url passed=true msg_parts=() code
   if [[ -z "${EGRESS_URLS}" ]]; then
     add_check "egress" "Egress reachability" false \
       "No egress URLs configured for this distribution family." "{}"
@@ -349,9 +378,10 @@ check_egress() {
   IFS="${IFS_backup}"
   for url in "${urls[@]}"; do
     [[ -z "${url}" ]] && continue
-    if ! curl -fsSIL --max-time 15 "${url}" >/dev/null 2>&1; then
+    if ! url_reachable "${url}"; then
       passed=false
-      msg_parts+=("cannot reach ${url}")
+      code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -L -X GET "${url}" 2>/dev/null || echo 000)"
+      msg_parts+=("cannot reach ${url} (HTTP ${code})")
     fi
   done
   local msg

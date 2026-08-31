@@ -1,18 +1,20 @@
 ---
+- name: Assert M1 installer target distribution
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: >-
+      M1 supports Ubuntu 24.04 (Debian family) only.
+      Fedora 44 support is planned for M2.
+  tags:
+    - common
+
 - name: Install common packages (Debian family)
   ansible.builtin.apt:
     name: "{{ common_packages_debian }}"
     state: present
     update_cache: true
   when: ansible_os_family == "Debian"
-  tags:
-    - common
-
-- name: Install common packages (RedHat family)
-  ansible.builtin.dnf:
-    name: "{{ common_packages_redhat }}"
-    state: present
-  when: ansible_os_family == "RedHat"
   tags:
     - common
 
@@ -61,34 +63,12 @@
   tags:
     - common
 
-- name: Configure chrony servers (Fedora/RHEL path)
-  ansible.builtin.lineinfile:
-    path: /etc/chrony.conf
-    regexp: '^server {{ item | regex_escape }} '
-    line: "server {{ item }} iburst"
-    state: present
-    create: false
-  loop: "{{ common_chrony_servers }}"
-  when: ansible_os_family == "RedHat"
-  notify: Restart chrony
-  tags:
-    - common
-
-- name: Ensure chrony is enabled (Debian)
+- name: Ensure chrony is enabled
   ansible.builtin.service:
     name: chrony
     state: started
     enabled: true
   when: ansible_os_family == "Debian"
-  tags:
-    - common
-
-- name: Ensure chrony is enabled (RedHat)
-  ansible.builtin.service:
-    name: chronyd
-    state: started
-    enabled: true
-  when: ansible_os_family == "RedHat"
   tags:
     - common
 
@@ -118,34 +98,6 @@
     enabled: true
     state: started
   when: ansible_os_family == "Debian"
-  tags:
-    - common
-
-- name: Configure dnf-automatic without automatic reboot (RedHat)
-  ansible.builtin.copy:
-    dest: /etc/dnf/automatic.conf
-    owner: root
-    group: root
-    mode: "0644"
-    content: |
-      [commands]
-      upgrade_type = default
-      download_updates = yes
-      apply_updates = yes
-      [emitters]
-      emit_via = stdio
-      [base]
-      reboot = never
-  when: ansible_os_family == "RedHat"
-  tags:
-    - common
-
-- name: Ensure dnf-automatic timer is enabled (RedHat)
-  ansible.builtin.service:
-    name: dnf-automatic-install.timer
-    enabled: true
-    state: started
-  when: ansible_os_family == "RedHat"
   tags:
     - common
 
@@ -193,6 +145,17 @@
     group: root
     mode: "0600"
   when: not common_secrets_stat.stat.exists
+  no_log: true
+  tags:
+    - common
+
+- name: Enforce secrets file ownership and permissions
+  ansible.builtin.file:
+    path: "{{ common_qops_secrets_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: common_secrets_stat.stat.exists
   no_log: true
   tags:
     - common

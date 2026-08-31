@@ -1,2 +1,0 @@
-ALTER TABLE IF EXISTS metrics_gauge MODIFY TTL toDateTime(timestamp) + INTERVAL {{ e2b_clickhouse_retention_days }} DAY;
-ALTER TABLE IF EXISTS metrics_sum MODIFY TTL toDateTime(timestamp) + INTERVAL {{ e2b_clickhouse_retention_days }} DAY;
