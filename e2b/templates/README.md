@@ -86,11 +86,31 @@ use these exact names.
 | `E2B_BASE_IMAGE` | no | `e2bdev/base` | Override base image; uses `fromImage` when set to a non-default value. |
 
 \*At least one of `E2B_API_URL` or `E2B_DOMAIN` is required. If both are
-omitted the script **exits 2** and does not call the SDK. The SDK's own default
-is `e2b.app`; we refuse that so a missing URL cannot send a customer build to
-E2B cloud. Values are passed explicitly as `Template.build` / `Template.exists`
-options (`apiKey`, `apiUrl`, `domain`) — we never rely on the SDK filling
-`domain` from its compiled default.
+omitted the script **exits 2** and does not call the SDK.
+
+**Cloud rejection (not just presence).** The script parses `E2B_API_URL` with
+`new URL()` (scheme must be `http` or `https`) and treats `E2B_DOMAIN` as a
+hostname. After lowercasing and stripping a trailing DNS dot, a hostname is
+**E2B Cloud** iff it is exactly `e2b.app` or a DNS child of that apex
+(`host === 'e2b.app' || host.endsWith('.e2b.app')`). That rejects `e2b.app`,
+`api.e2b.app`, and any subdomain of `e2b.app`. It does **not** reject
+`https://evil.com/?x=e2b.app` (host is `evil.com`) or
+`https://api.e2b.app.customer.net` (host is not a child of `e2b.app`). A Cloud
+hostname, or a malformed / non-http(s) `E2B_API_URL`, **exits 2**, names the
+offending variable and its value, states that the build was refused because it
+would have targeted E2B Cloud (Cloud case), and calls neither `Template.exists`
+nor `Template.build`.
+
+**No escape hatch.** This installer builds templates only for the customer's
+self-hosted cluster. There is no legitimate reason for this script to talk to
+E2B Cloud, and an opt-in would be a footgun (inherited CI env, copied `.env`).
+Point the variables at the local API instead: `E2B_API_URL=http://127.0.0.1:8080`.
+
+Values are passed explicitly as `Template.build` / `Template.exists` options
+(`apiKey`, `apiUrl`, and `domain` when set). When only `E2B_DOMAIN` is set, the
+script synthesizes `apiUrl=https://api.<domain>` so a leftover process
+`E2B_API_URL` cannot win (the SDK resolves
+`opts.apiUrl || process.env.E2B_API_URL || https://api.${domain}`).
 
 ## JSON summary schema
 
@@ -122,7 +142,7 @@ should parse **the last line of stdout**.
 |---|---|---|
 | 0 | success | Every processed alias was `built` or `skipped` |
 | 1 | build failed | An SDK `exists`/`build` call threw (`action: failed`) |
-| 2 | config error | Missing `E2B_API_KEY` or missing both `E2B_API_URL` and `E2B_DOMAIN` |
+| 2 | config error | Missing `E2B_API_KEY`; missing both `E2B_API_URL` and `E2B_DOMAIN`; Cloud hostname (`e2b.app` or a child); malformed or non-http(s) `E2B_API_URL` |
 
 Skipped aliases are **success** (exit 0). That is the `site.yml` idempotence
 path.

@@ -182,27 +182,115 @@ describe('runBuildTemplates', () => {
     expect(summary.templates.every((row) => row.action === 'built')).toBe(true);
   });
 
-  it('fails closed when E2B_API_KEY is missing and never talks to e2b.app', async () => {
-    const { exitCode } = await runBuildTemplates({ [ENV_API_URL]: LOCAL_API });
-
+  async function expectConfigRefusal(env: NodeJS.ProcessEnv): Promise<string> {
+    const { exitCode } = await runBuildTemplates(env);
     expect(exitCode).toBe(EXIT_CONFIG);
     expect(exitCode).not.toBe(EXIT_OK);
-    expect(stderr.join('\n')).toContain(ENV_API_KEY);
-    expect(mockTemplate.build).not.toHaveBeenCalled();
+    expect(mockTemplate.exists.mock.calls.length).toBe(0);
+    expect(mockTemplate.build.mock.calls.length).toBe(0);
     expect(mockTemplate.exists).not.toHaveBeenCalled();
+    expect(mockTemplate.build).not.toHaveBeenCalled();
+    return stderr.join('\n');
+  }
+
+  it('fails closed when E2B_API_KEY is missing and never talks to e2b.app', async () => {
+    const err = await expectConfigRefusal({ [ENV_API_URL]: LOCAL_API });
+    expect(err).toContain(ENV_API_KEY);
     expect(serializedSdkCalls()).not.toContain('e2b.app');
   });
 
   it('fails closed when API URL and domain are missing and never talks to e2b.app', async () => {
-    const { exitCode } = await runBuildTemplates({ [ENV_API_KEY]: 'e2b_testkey' });
-
-    expect(exitCode).toBe(EXIT_CONFIG);
-    expect(exitCode).not.toBe(EXIT_OK);
-    expect(stderr.join('\n')).toContain(ENV_API_URL);
-    expect(stderr.join('\n')).toContain(ENV_DOMAIN);
-    expect(mockTemplate.build).not.toHaveBeenCalled();
-    expect(mockTemplate.exists).not.toHaveBeenCalled();
+    const err = await expectConfigRefusal({ [ENV_API_KEY]: 'e2b_testkey' });
+    expect(err).toContain(ENV_API_URL);
+    expect(err).toContain(ENV_DOMAIN);
     expect(serializedSdkCalls()).not.toContain('e2b.app');
+  });
+
+  it('refuses E2B_DOMAIN=e2b.app and never calls the SDK', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_DOMAIN]: 'e2b.app',
+    });
+    expect(err).toContain(ENV_DOMAIN);
+    expect(err).toContain('e2b.app');
+    expect(err).toContain('E2B Cloud');
+  });
+
+  it('refuses E2B_API_URL=https://api.e2b.app and never calls the SDK', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'https://api.e2b.app',
+    });
+    expect(err).toContain(ENV_API_URL);
+    expect(err).toContain('https://api.e2b.app');
+    expect(err).toContain('E2B Cloud');
+  });
+
+  it('refuses a subdomain of e2b.app on E2B_API_URL and never calls the SDK', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'https://api.us.e2b.app',
+    });
+    expect(err).toContain(ENV_API_URL);
+    expect(err).toContain('https://api.us.e2b.app');
+    expect(err).toContain('E2B Cloud');
+  });
+
+  it('refuses a subdomain of e2b.app on E2B_DOMAIN and never calls the SDK', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_DOMAIN]: 'templates.e2b.app',
+    });
+    expect(err).toContain(ENV_DOMAIN);
+    expect(err).toContain('templates.e2b.app');
+    expect(err).toContain('E2B Cloud');
+  });
+
+  it('refuses E2B_DOMAIN=e2b.app even when a local API URL is also set', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: LOCAL_API,
+      [ENV_DOMAIN]: 'e2b.app',
+    });
+    expect(err).toContain(ENV_DOMAIN);
+    expect(err).toContain('E2B Cloud');
+  });
+
+  it('refuses a malformed E2B_API_URL and never calls the SDK', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'not-a-url',
+    });
+    expect(err).toContain(ENV_API_URL);
+    expect(err).toContain('not-a-url');
+  });
+
+  it('refuses a non-http(s) E2B_API_URL and never calls the SDK', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'ftp://127.0.0.1:8080',
+    });
+    expect(err).toContain(ENV_API_URL);
+    expect(err).toContain('ftp://127.0.0.1:8080');
+  });
+
+  it('does not treat a query-string e2b.app as Cloud', async () => {
+    const { exitCode } = await runBuildTemplates({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'https://evil.com/?x=e2b.app',
+    });
+    expect(exitCode).toBe(EXIT_OK);
+    expect(mockTemplate.exists.mock.calls.length).toBeGreaterThan(0);
+    expect(mockTemplate.build.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('does not treat api.e2b.app.customer.net as Cloud', async () => {
+    const { exitCode } = await runBuildTemplates({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'https://api.e2b.app.customer.net',
+    });
+    expect(exitCode).toBe(EXIT_OK);
+    expect(buildCalls()[0]?.options.apiUrl).toBe('https://api.e2b.app.customer.net');
   });
 
   it('honours the base image override env var', async () => {
@@ -269,7 +357,7 @@ describe('runBuildTemplates', () => {
     expect(failed.exitCode).not.toBe(skipped.exitCode);
   });
 
-  it('accepts E2B_DOMAIN instead of E2B_API_URL', async () => {
+  it('accepts E2B_DOMAIN=e2b.example.com and synthesizes a non-cloud apiUrl', async () => {
     const { exitCode } = await runBuildTemplates({
       [ENV_API_KEY]: 'e2b_testkey',
       [ENV_DOMAIN]: 'e2b.example.com',
@@ -278,6 +366,16 @@ describe('runBuildTemplates', () => {
     expect(exitCode).toBe(EXIT_OK);
     const calls = buildCalls();
     expect(calls[0]?.options.domain).toBe('e2b.example.com');
-    expect(calls[0]?.options.apiUrl).toBeUndefined();
+    expect(calls[0]?.options.apiUrl).toBe('https://api.e2b.example.com');
+    expect(mockTemplate.exists.mock.calls.length).toBe(TEMPLATE_SPECS.length);
+    expect(mockTemplate.build.mock.calls.length).toBe(TEMPLATE_SPECS.length);
+  });
+
+  it('accepts E2B_API_URL=http://127.0.0.1:8080', async () => {
+    const { exitCode } = await runBuildTemplates(validEnv());
+    expect(exitCode).toBe(EXIT_OK);
+    expect(buildCalls()[0]?.options.apiUrl).toBe(LOCAL_API);
+    expect(mockTemplate.exists.mock.calls.length).toBe(TEMPLATE_SPECS.length);
+    expect(mockTemplate.build.mock.calls.length).toBe(TEMPLATE_SPECS.length);
   });
 });

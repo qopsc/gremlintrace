@@ -20,6 +20,7 @@ DRY_RUN=false
 COMPILE=false
 CLONE_DIR=""
 PATCH_FILES=()
+GOWORK_GO_VERSION=""
 
 E2B_REPO_URL="https://github.com/e2b-dev/infra.git"
 OTEL_CONFIG_RELPATH="packages/otel-collector/tests/otel-collector.yaml"
@@ -104,6 +105,52 @@ assert_dist_version() {
   local want="${E2B_PIN:0:7}"
   if [[ "${E2B_DIST_VERSION}" != "${want}" ]]; then
     die "e2b_dist_version (${E2B_DIST_VERSION}) != first 7 chars of e2b_pin (${want})"
+  fi
+}
+
+parse_gowork_go() {
+  local f="$1"
+  local v
+  [[ -f "${f}" ]] || die "go.work not found: ${f}"
+  v="$(sed -n 's/^[[:space:]]*go[[:space:]]\{1,\}\([0-9][0-9.]*\).*/\1/p' "${f}" | head -n 1)"
+  [[ -n "${v}" ]] || die "could not parse go directive from ${f}"
+  printf '%s\n' "${v}"
+}
+
+# Print "major minor patch" with missing components as 0 (so 1.26 == 1.26.0).
+go_version_triple() {
+  local v="$1"
+  [[ "${v}" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || die "invalid Go version: ${v}"
+  local -a parts
+  IFS=. read -ra parts <<< "${v}"
+  printf '%s %s %s' "${parts[0]}" "${parts[1]:-0}" "${parts[2]:-0}"
+}
+
+# Comparison rule: e2b_go_version must share major.minor with go.work's `go`
+# directive AND be >= that directive as a (major, minor, patch) triple
+# (missing patch = 0). So pin 1.26.6 satisfies go 1.26 and go 1.26.6, but not
+# go 1.26.7 (too old) or go 1.27 (different minor — a toolchain bump that
+# needs versions.yml + the CI matrix, never auto-corrected).
+go_pin_satisfies_gowork() {
+  local pin="$1"
+  local need="$2"
+  local p_maj p_min p_pat n_maj n_min n_pat
+  local p_triple n_triple
+  p_triple="$(go_version_triple "${pin}")"
+  n_triple="$(go_version_triple "${need}")"
+  read -r p_maj p_min p_pat <<< "${p_triple}"
+  read -r n_maj n_min n_pat <<< "${n_triple}"
+  if [[ "${p_maj}" != "${n_maj}" || "${p_min}" != "${n_min}" ]]; then
+    return 1
+  fi
+  (( p_pat >= n_pat ))
+}
+
+assert_go_toolchain() {
+  local src="$1"
+  GOWORK_GO_VERSION="$(parse_gowork_go "${src}/go.work")"
+  if ! go_pin_satisfies_gowork "${E2B_GO_VERSION}" "${GOWORK_GO_VERSION}"; then
+    die "e2b_go_version (${E2B_GO_VERSION}) does not satisfy go.work go ${GOWORK_GO_VERSION}; update versions.yml — do not auto-correct, toolchain bumps need a CI matrix run"
   fi
 }
 
@@ -216,8 +263,10 @@ run_build_container() {
     -e "E2B_PIN=${E2B_PIN}" \
     -e "E2B_DIST_VERSION=${E2B_DIST_VERSION}" \
     -e "E2B_GO_VERSION=${E2B_GO_VERSION}" \
+    -e "GOWORK_GO_VERSION=${GOWORK_GO_VERSION}" \
     -e "ENVD_VERSION=${ENVD_VERSION}" \
     -e "GOOSE_VERSION=${GOOSE_VERSION}" \
+    -e "GOTOOLCHAIN=local" \
     -v "${src}:/src" \
     -v "${DIST_DIR}:/out" \
     -v "${PATCHES_DIR}:/patches:ro" \
@@ -290,6 +339,7 @@ write_build_info() {
   local patches_json="[]"
   local -a patch_items=()
   local p base hash
+  [[ -n "${GOWORK_GO_VERSION}" ]] || die "GOWORK_GO_VERSION unset when writing BUILD_INFO"
 
   list_patch_files
   if (( ${#PATCH_FILES[@]} > 0 )); then
@@ -307,6 +357,7 @@ write_build_info() {
   "e2b_pin": "${E2B_PIN}",
   "e2b_dist_version": "${E2B_DIST_VERSION}",
   "e2b_go_version": "${E2B_GO_VERSION}",
+  "gowork_go_version": "${GOWORK_GO_VERSION}",
   "envd_version": "${ENVD_VERSION}",
   "goose_version": "${GOOSE_VERSION}",
   "expected_migration_timestamp": "${EXPECTED_MIGRATION_TIMESTAMP}",
@@ -336,12 +387,18 @@ compile_and_pack() {
   : "${ENVD_VERSION:?ENVD_VERSION must be set}"
   : "${GOOSE_VERSION:?GOOSE_VERSION must be set}"
   : "${DIST_DIR:?}"
+  # Installed toolchain only. Without this, modern Go auto-downloads a newer
+  # toolchain when go.work/go.mod requires one, and BUILD_INFO.e2b_go_version
+  # would label the artifact with a toolchain it was not built with.
+  export GOTOOLCHAIN=local
 
   local head
   head="$("${GIT}" -C "${src}" rev-parse HEAD)"
   if [[ "${head}" != "${E2B_PIN}" ]]; then
     die "source HEAD ${head} != E2B_PIN ${E2B_PIN}"
   fi
+
+  assert_go_toolchain "${src}"
 
   local src_envd src_goose
   src_envd="$(parse_envd_version "${src}/packages/envd/pkg/version.go")"
@@ -527,6 +584,7 @@ main() {
   fi
 
   apply_patches "${src}"
+  assert_go_toolchain "${src}"
   run_build_container "${src}"
 }
 

@@ -16,17 +16,7 @@ VERSIONS_FILE="${REPO_ROOT}/versions.yml"
 TARBALL=""
 
 yaml_get() {
-  local file="$1"
-  local key="$2"
-  python3 -c '
-import sys
-import yaml
-
-path, key = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as fh:
-    data = yaml.safe_load(fh)
-print(data[key])
-' "${file}" "${key}"
+  python3 "${REPO_ROOT}/ci/yaml_versions.py" get "$1" "${VERSIONS_FILE}"
 }
 
 die() {
@@ -40,7 +30,9 @@ assert_static() {
   file_out="$(file -b "${bin}")"
   grep -qi 'statically linked' <<<"${file_out}" || die "expected statically linked: ${bin} (${file_out})"
   ldd_out="$(ldd "${bin}" 2>&1 || true)"
-  grep -q 'libc.so' <<<"${ldd_out}" && die "expected statically linked (ldd shows libc): ${bin}"
+  if grep -q 'libc.so' <<<"${ldd_out}"; then
+    die "expected statically linked (ldd shows libc): ${bin}"
+  fi
 }
 
 assert_dynamic() {
@@ -55,6 +47,23 @@ newest_migration_timestamp() {
   local migdir="$1"
   # shellcheck disable=SC2012
   ls "${migdir}" | sed 's/_.*//' | sort | tail -n 1
+}
+
+# The API embeds expectedMigrationTimestamp via -X=main.expectedMigrationTimestamp at link time.
+extract_api_migration_timestamp() {
+  local bin="$1"
+  local -a matches=()
+  local line
+  while IFS= read -r line; do
+    matches+=("${line}")
+  done < <(strings -a "${bin}" | grep -E '^[0-9]{14}$' | LC_ALL=C sort -u)
+  if (( ${#matches[@]} != 1 )); then
+    if (( ${#matches[@]} == 0 )); then
+      die "could not extract expectedMigrationTimestamp from api binary (no 14-digit string)"
+    fi
+    die "ambiguous expectedMigrationTimestamp in api binary: ${matches[*]}"
+  fi
+  printf '%s\n' "${matches[0]}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -102,13 +111,19 @@ if [[ "${clean_nfs}" == "True" || "${clean_nfs}" == "true" ]]; then
 fi
 
 # API refuses to start when the DB migration set is older than expectedMigrationTimestamp.
-want_pin="$(yaml_get "${VERSIONS_FILE}" e2b_pin)"
+want_pin="$(yaml_get e2b_pin)"
 got_pin="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["e2b_pin"])' "${WORK}/BUILD_INFO")"
 [[ "${got_pin}" == "${want_pin}" ]] || die "BUILD_INFO e2b_pin ${got_pin} != versions.yml ${want_pin}"
 
 want_ts="$(newest_migration_timestamp "${WORK}/migrations/postgres")"
-got_ts="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected_migration_timestamp"])' "${WORK}/BUILD_INFO")"
-[[ "${got_ts}" == "${want_ts}" ]] || die "BUILD_INFO expected_migration_timestamp ${got_ts} != newest migration ${want_ts}"
+[[ -n "${want_ts}" ]] || die "no postgres migrations found"
+
+build_info_ts="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected_migration_timestamp"])' "${WORK}/BUILD_INFO")"
+[[ "${build_info_ts}" == "${want_ts}" ]] || die "BUILD_INFO expected_migration_timestamp ${build_info_ts} != newest migration ${want_ts}"
+
+api_ts="$(extract_api_migration_timestamp "${WORK}/bin/api")"
+[[ "${api_ts}" == "${want_ts}" ]] || die "api binary expectedMigrationTimestamp ${api_ts} != newest migration ${want_ts}"
+[[ "${api_ts}" == "${build_info_ts}" ]] || die "api binary timestamp ${api_ts} != BUILD_INFO ${build_info_ts}"
 
 assert_static "${WORK}/bin/envd"
 assert_static "${WORK}/bin/api"

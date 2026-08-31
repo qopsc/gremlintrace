@@ -17,9 +17,7 @@ jobs:
       # actions/checkout v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Resolve upstream pin and update versions.yml
-        run: |
-          python3 -m pip install --disable-pip-version-check -q pyyaml
-          ./ci/bump-e2b-pin.sh
+        run: ./ci/bump-e2b-pin.sh
       # A dist bump that changes envd/kernel/Firecracker pins requires template rebuilds;
       # upgrade.yml (later task) gates that on env_builds.envd_version.
       - name: Open pull request
@@ -31,8 +29,12 @@ jobs:
           body: |
             Automated monthly pin bump from `e2b-dev/infra` HEAD.
 
-            - Updates `versions.yml` (`e2b_pin`, `e2b_dist_version`, `envd_version`, `goose_version`)
+            - Updates `versions.yml` (`e2b_pin`, `e2b_dist_version`, `e2b_go_version`,
+              `envd_version`, `goose_version`)
             - Syncs `e2b/e2b.pin`
+
+            `e2b_go_version` is set from upstream `go.work` so `build.sh` toolchain
+            validation passes. A Go minor bump needs the installer matrix re-run.
 
             Merge only after `build-e2b` and the installer matrix are green on this PR.
           branch: automation/bump-e2b-pin

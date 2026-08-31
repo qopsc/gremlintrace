@@ -27,7 +27,13 @@ That will:
    repo), verify `HEAD` equals the pin, and `git apply` every `e2b/patches/*.patch`
    in lexical order (empty `patches/` is a no-op; a literal `*.patch` glob is not
    applied).
-3. `docker build` `Dockerfile.build` tagged
+3. Parse the `go` directive from the checkout's `go.work` and compare it to
+   `e2b_go_version`. The pin must share **major.minor** with `go.work` and be
+   **≥** that directive (missing patch = 0). A mismatch aborts and names both
+   versions — it does not auto-correct; bumping the toolchain needs `versions.yml`
+   plus a CI matrix run. The compile then runs with `GOTOOLCHAIN=local` so Go
+   cannot silently fetch a different toolchain.
+4. `docker build` `Dockerfile.build` tagged
    `codereviewer-e2b-build:<e2b_go_version>` (never `latest`), then `docker run`
    to compile and pack.
 
@@ -77,7 +83,8 @@ JSON object. Stable key names — later tasks parse this file:
 |---|---|---|
 | `e2b_pin` | Full upstream commit SHA | Installer provenance; must match `versions.yml` |
 | `e2b_dist_version` | First 7 chars of the pin; tarball name | Ansible `e2b_dist_version` download |
-| `e2b_go_version` | Go toolchain used for the build | Debugging / rebuild |
+| `e2b_go_version` | Go toolchain pin from `versions.yml` (the image tag / intended compiler) | Debugging / rebuild |
+| `gowork_go_version` | `go` directive observed in the checkout's `go.work` | Evidence the pin satisfied upstream; must share major.minor with `e2b_go_version` and be ≤ it |
 | `envd_version` | From `packages/envd/pkg/version.go` (must equal `versions.yml`) | **`upgrade.yml` compares this to decide whether templates must be rebuilt** |
 | `goose_version` | From `packages/db/go.mod` (must equal `versions.yml`) | Migrator binary identity |
 | `expected_migration_timestamp` | Newest `packages/db/migrations` prefix, same formula as `packages/api/Makefile` (`ls \| sed 's/_.*//' \| sort \| tail -n 1`) | Must match the timestamp baked into `bin/api`; the API refuses to start against a different DB |
@@ -100,6 +107,18 @@ a new image without using `latest`. Named volumes `codereviewer-e2b-gomod` and
 
 `E2B_PIN` is accepted as a build `ARG` (and exported into the image env) even
 though the clone happens on the host — callers pass it from `versions.yml`.
+`GOTOOLCHAIN=local` is set in the image and again on `docker run` so a
+`go.work` bump cannot pull a newer compiler behind our back.
+
+## Go toolchain comparison
+
+`e2b_go_version` (from `versions.yml`) vs `go.work`'s `go` line:
+
+- Same **major.minor** (so `1.26.6` may satisfy `go 1.26` or `go 1.26.6`, never `go 1.27`).
+- Pin is **≥** the `go.work` triple (missing patch = 0), so `1.26.6` does not satisfy `go 1.26.7`.
+
+Mismatch is a hard fail that names both versions and tells the operator to update
+`versions.yml`. The build does not pick a toolchain for you.
 
 ## What is untested here
 
@@ -118,5 +137,6 @@ no `/dev/kvm`):
 
 Verified on this machine: `build.sh --dry-run`, pin-mismatch abort, lexical
 patch loop + apply failure, empty `patches/` glob, Docker not called in
-`--dry-run`, Dockerfile has no hard-coded Go version, `shellcheck` on
+`--dry-run`, Dockerfile has no hard-coded Go version, `go.work` match and
+mismatch against fixture `--src` trees (no Docker, no clone), `shellcheck` on
 `build.sh`.
