@@ -8,8 +8,8 @@ import re
 import sys
 from pathlib import Path
 
-SCALAR_RE = re.compile(
-    r"^(?P<key>[a-zA-Z0-9_]+):\s*(?P<value>\"[^\"]*\"|'[^']*'|[^#\n]+?)\s*(?:#.*)?$"
+TOP_LEVEL_KEY_RE = re.compile(
+    r"^(?P<key>[a-zA-Z0-9_]+):\s*(?P<rest>.+?)\s*(?:#.*)?$"
 )
 
 
@@ -22,15 +22,28 @@ def parse_scalar(raw: str) -> str:
 
 def load(path: Path) -> dict[str, str]:
     data: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if line.startswith((" ", "\t")):
+        if line.strip() == "---":
             continue
-        match = SCALAR_RE.match(line)
+        if line[0] in (" ", "\t"):
+            continue
+        match = TOP_LEVEL_KEY_RE.match(line)
         if not match:
-            continue
-        data[match.group("key")] = parse_scalar(match.group("value"))
+            raise SystemExit(f"{path}:{lineno}: invalid top-level entry")
+        key = match.group("key")
+        rest = match.group("rest").strip()
+        if key in data:
+            raise SystemExit(f"{path}:{lineno}: duplicate key {key!r}")
+        if rest.startswith("{") or rest.startswith("["):
+            raise SystemExit(
+                f"{path}:{lineno}: flow mapping/sequence not allowed for scalar key {key!r}"
+            )
+        value = parse_scalar(rest)
+        if not value:
+            raise SystemExit(f"{path}:{lineno}: empty value for key {key!r}")
+        data[key] = value
     return data
 
 
@@ -48,7 +61,7 @@ def update(path: Path, updates: dict[str, str]) -> None:
     for line in lines:
         stripped = line.lstrip()
         if stripped and not stripped.startswith("#") and not line.startswith((" ", "\t")):
-            match = SCALAR_RE.match(line.rstrip("\n"))
+            match = TOP_LEVEL_KEY_RE.match(line.rstrip("\n"))
             if match and match.group("key") in updates:
                 key = match.group("key")
                 indent = line[: len(line) - len(line.lstrip())]

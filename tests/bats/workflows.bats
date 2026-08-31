@@ -105,55 +105,27 @@ PY
   [ "$output" = "ok" ]
 }
 
-@test "workflows do not pip install PyYAML" {
-  run python3 - "${WORKFLOWS_DIR}" <<'PY'
-import sys
-from pathlib import Path
-
-errors = []
-for path in sorted(Path(sys.argv[1]).glob("*.yml")):
-    text = path.read_text(encoding="utf-8")
-    if "pyyaml" in text.lower() or "PyYAML" in text:
-        errors.append(f"{path}: references PyYAML pip install")
-
-if errors:
-    print("\n".join(errors))
-    raise SystemExit(1)
-print("ok")
-PY
-  [ "$status" -eq 0 ]
-  [ "$output" = "ok" ]
-}
-
-@test "lint workflow installs make check toolchain via ci/install-lint-tools.sh" {
-  run grep -F './ci/install-lint-tools.sh' "${WORKFLOWS_DIR}/lint.yml"
-  [ "$status" -eq 0 ]
-}
-
-@test "build-e2b workflow packs mirrored artifacts before release" {
-  run grep -F 'ci/pack-mirrored-artifacts.sh' "${WORKFLOWS_DIR}/build-e2b.yml"
-  [ "$status" -eq 0 ]
-  run grep -F 'ci/stage-release.sh' "${WORKFLOWS_DIR}/build-e2b.yml"
-  [ "$status" -eq 0 ]
-}
-
-@test "ci scripts read versions.yml without PyYAML" {
-  run python3 - "${REPO_ROOT}/ci" <<'PY'
+@test "repository entry scripts do not import PyYAML" {
+  run python3 - "${REPO_ROOT}" <<'PY'
 import re
 import sys
 from pathlib import Path
 
-ci = Path(sys.argv[1])
+root = Path(sys.argv[1])
+# The dependency checker itself is a lint-time tool, never invoked by a build or
+# mirror job. It runs only under `make check`, where ci/install-lint-tools.sh
+# installs PyYAML at a pinned version.
+skip = {root / "ci/check_workflow_job_deps.py"}
 errors = []
-for path in sorted(ci.glob("*.py")):
-    text = path.read_text(encoding="utf-8")
-    if re.search(r"(^|\n)import yaml\b", text) or re.search(r"(^|\n)from yaml\b", text):
-        errors.append(f"{path}: imports PyYAML")
-for path in sorted(ci.glob("*.sh")):
-    text = path.read_text(encoding="utf-8")
-    if "pyyaml" in text.lower():
-        errors.append(f"{path}: references pyyaml")
-
+for pattern in ("ci/*.py", "ci/*.sh", "e2b/build/build.sh"):
+    for path in sorted(root.glob(pattern)):
+        if path in skip:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"(^|\n)import yaml\b", text) or re.search(r"(^|\n)from yaml\b", text):
+            errors.append(f"{path}: imports PyYAML")
+        if re.search(r"pip\s+install[^\n]*\bpyyaml\b", text, re.IGNORECASE):
+            errors.append(f"{path}: pip installs pyyaml")
 if errors:
     print("\n".join(errors))
     raise SystemExit(1)

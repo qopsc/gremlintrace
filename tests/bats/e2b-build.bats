@@ -251,6 +251,31 @@ write_gowork() {
   [ -s "${DOCKER_STUB_LOG}" ]
 }
 
+@test "build.sh aborts when yaml_versions helper is missing" {
+  local fake_root versions pin
+  fake_root="${TEST_TMPDIR}/fake-repo"
+  mkdir -p "${fake_root}/e2b/build" "${fake_root}/ci" "${fake_root}/e2b"
+  cp "${BUILD_SH}" "${fake_root}/e2b/build/build.sh"
+  cp "${VERSIONS_FILE}" "${fake_root}/versions.yml"
+  cp "${E2B_PIN_FILE}" "${fake_root}/e2b/e2b.pin"
+  versions="${fake_root}/versions.yml"
+  pin="${fake_root}/e2b/e2b.pin"
+  run "${fake_root}/e2b/build/build.sh" --dry-run --versions "${versions}" --pin-file "${pin}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"yaml_versions helper not found"* ]]
+}
+
+@test "build.sh aborts when versions.yml key is missing" {
+  local versions pin
+  versions="${TEST_TMPDIR}/versions-missing-key.yml"
+  pin="${TEST_TMPDIR}/e2b.pin"
+  grep -v '^e2b_pin:' "${VERSIONS_FILE}" >"${versions}"
+  cp "${E2B_PIN_FILE}" "${pin}"
+  run "${BUILD_SH}" --dry-run --versions "${versions}" --pin-file "${pin}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing key"* ]]
+}
+
 @test "--dry-run does not invoke Docker" {
   run "${BUILD_SH}" --dry-run
   [ "$status" -eq 0 ]
