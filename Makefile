@@ -14,7 +14,11 @@ templates-ci: $(TEMPLATES_STAMP)
 lint: syntax-check templates-ci
 	yamllint .
 	ansible-lint
-	shellcheck bootstrap.sh tests/bats/helpers/ansible-playbook e2b/build/build.sh ci/*.sh
+	shellcheck bootstrap.sh tests/bats/helpers/ansible-playbook tests/fixtures/render-template.sh \
+	e2b/build/build.sh ci/*.sh \
+	ansible/roles/preflight/files/run-preflight.sh \
+	ansible/roles/e2b_host/files/*.sh \
+	ansible/roles/e2b_datastores/files/*.sh
 	npm --prefix $(TEMPLATES_DIR) run typecheck
 
 syntax-check:

@@ -1,6 +1,70 @@
 ---
-- name: Placeholder for the preflight role
-  ansible.builtin.debug:
-    msg: "preflight role is implemented in task 5"
+- name: Install preflight runner
+  ansible.builtin.copy:
+    src: run-preflight.sh
+    dest: /usr/local/lib/qops/run-preflight.sh
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - preflight
+
+- name: Ensure qops config directory exists for the preflight report
+  ansible.builtin.file:
+    path: "{{ preflight_qops_marker_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - preflight
+
+- name: Run preflight checks
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/run-preflight.sh
+  environment:
+    PREFLIGHT_REPORT_PATH: "{{ preflight_report_path }}"
+    PREFLIGHT_SCHEMA_VERSION: "{{ preflight_schema_version | string }}"
+    PREFLIGHT_MIN_VCPUS: "{{ preflight_min_vcpus | string }}"
+    PREFLIGHT_MIN_RAM_MB: "{{ preflight_min_ram_mb | string }}"
+    PREFLIGHT_MIN_DISK_GB: "{{ preflight_min_disk_gb | string }}"
+    PREFLIGHT_MIN_GLIBC: "{{ preflight_min_glibc_version }}"
+    PREFLIGHT_MIN_KERNEL: "{{ preflight_min_kernel_version }}"
+    PREFLIGHT_DATA_PATH: "{{ (e2b_data_device | length > 0) | ternary(e2b_data_device, preflight_orchestrator_root) }}"
+    PREFLIGHT_QOPS_DOMAIN: "{{ qops_domain }}"
+    PREFLIGHT_DNS_API_HOST: "{{ preflight_dns_api_host }}"
+    PREFLIGHT_DNS_RANDOM_HOST: "{{ preflight_dns_random_host }}"
+    PREFLIGHT_QOPS_MARKER_DIR: "{{ preflight_qops_marker_dir }}"
+    PREFLIGHT_ALLOWED_PORT_22_UNITS: "{{ preflight_allowed_port_22_units | join(',') }}"
+    PREFLIGHT_ALLOWED_PORT_80_UNITS: "{{ preflight_allowed_port_80_units | join(',') }}"
+    PREFLIGHT_ALLOWED_PORT_443_UNITS: "{{ preflight_allowed_port_443_units | join(',') }}"
+    PREFLIGHT_EGRESS_URLS: >-
+      {{ (preflight_egress_urls_debian if ansible_os_family == 'Debian'
+          else preflight_egress_urls_fedora) | join('|') }}
+  register: preflight_run
+  changed_when: false
+  failed_when: false
+  tags:
+    - preflight
+
+- name: Load preflight report
+  ansible.builtin.slurp:
+    src: "{{ preflight_report_path }}"
+  register: preflight_report_slurp
+  tags:
+    - preflight
+
+- name: Parse preflight report
+  ansible.builtin.set_fact:
+    preflight_report: "{{ preflight_report_slurp.content | b64decode | from_json }}"
+  tags:
+    - preflight
+
+- name: Fail when preflight checks did not pass
+  ansible.builtin.fail:
+    msg: >-
+      Preflight failed (report: {{ preflight_report_path }}).
+      {{ preflight_report.failures | join(' ') }}
+  when: not preflight_report.passed
   tags:
     - preflight

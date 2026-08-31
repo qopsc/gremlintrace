@@ -1,4 +1,27 @@
 ---
-e2b_datastores_compose_project: e2b-data
-e2b_datastores_postgres_bind_host: 127.0.0.1
-e2b_datastores_postgres_port: 5433
+e2b_datastores_compose_dir: /etc/qops/e2b-data
+e2b_datastores_compose_file: "{{ e2b_datastores_compose_dir }}/docker-compose.yml"
+e2b_datastores_otel_config: "{{ e2b_datastores_compose_dir }}/otel-collector.yaml"
+e2b_datastores_postgres_init_dir: "{{ e2b_datastores_compose_dir }}/postgres-init"
+e2b_datastores_clickhouse_init_dir: "{{ e2b_datastores_compose_dir }}/clickhouse-init"
+
+e2b_datastores_postgres_db: e2b
+e2b_datastores_postgres_user: postgres
+
+e2b_datastores_redis_bind_host: 127.0.0.1
+e2b_datastores_redis_port: 6379
+
+e2b_datastores_clickhouse_bind_host: 127.0.0.1
+e2b_datastores_clickhouse_http_port: 8123
+e2b_datastores_clickhouse_native_port: 9000
+e2b_datastores_clickhouse_db: default
+
+e2b_datastores_otel_bind_host: 127.0.0.1
+e2b_datastores_otel_grpc_port: 4317
+e2b_datastores_otel_health_port: 13133
+
+e2b_datastores_compose_services:
+  - postgres
+  - redis
+  - clickhouse
+  - otel-collector

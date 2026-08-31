@@ -1,0 +1,19 @@
+#!/usr/sbin/nft -f
+# Managed by codereviewer host_firewall role.
+
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority 0; policy drop;
+
+    iif "lo" accept
+    ct state established,related accept
+    tcp dport { 22, 80, 443 } accept
+{% for cidr in e2b_allow_sandbox_internal_cidrs %}
+    ip saddr {{ cidr }} accept
+{% endfor %}
+    iifname "veth-*" tcp dport 5010-5012 accept
+    iifname "veth-*" tcp dport 5016-5018 accept
+  }
+}
