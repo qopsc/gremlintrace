@@ -32,6 +32,9 @@ required = [
     'kodus_installer_ref', 'kodus_image_tag',
     'traefik_version', 'goose_version', 'node_version', 'e2b_sdk_version',
     'kodus_graph_version',
+    'actionlint_version', 'actionlint_sha256', 'ansible_core_version',
+    'ansible_lint_version', 'yamllint_version', 'shellcheck_apt_version',
+    'bats_apt_version', 'node_ci_version',
 ]
 with open('${VERSIONS_FILE}') as f:
     data = yaml.safe_load(f)

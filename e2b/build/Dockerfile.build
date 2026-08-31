@@ -13,6 +13,9 @@ ARG GO_VERSION
 ARG E2B_PIN
 ENV E2B_PIN=${E2B_PIN}
 ENV GO_VERSION=${GO_VERSION}
+# Installed image toolchain only. Modern Go otherwise auto-downloads a newer
+# one when go.work/go.mod requires it, which would mislabel BUILD_INFO.
+ENV GOTOOLCHAIN=local
 
 # git: upstream Makefiles call `git rev-parse` for commitSHA ldflags.
 # make: invoke upstream packages/{orchestrator,api,client-proxy,envd} Makefiles.

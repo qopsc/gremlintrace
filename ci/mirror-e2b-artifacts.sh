@@ -16,24 +16,21 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSIONS_FILE="${REPO_ROOT}/versions.yml"
 OUT_DIR="${REPO_ROOT}/artifacts"
 BASE_URL="https://storage.googleapis.com/e2b-artifact-binaries"
+SUCCESS=false
 
 yaml_get() {
-  local file="$1"
-  local key="$2"
-  python3 -c '
-import sys
-import yaml
-
-path, key = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as fh:
-    data = yaml.safe_load(fh)
-print(data[key])
-' "${file}" "${key}"
+  python3 "${REPO_ROOT}/ci/yaml_versions.py" get "$1" "${VERSIONS_FILE}"
 }
 
 die() {
   printf 'error: %s\n' "$*" >&2
   exit 1
+}
+
+cleanup() {
+  if [[ "${SUCCESS}" != true && -n "${OUT_DIR:-}" && -d "${OUT_DIR}" ]]; then
+    rm -rf "${OUT_DIR}"
+  fi
 }
 
 fetch() {
@@ -69,9 +66,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-FC_VER="$(yaml_get "${VERSIONS_FILE}" firecracker_version)"
-KERNEL_VER="$(yaml_get "${VERSIONS_FILE}" kernel_version)"
-BUSYBOX_VER="$(yaml_get "${VERSIONS_FILE}" busybox_version)"
+trap cleanup EXIT
+
+FC_VER="$(yaml_get firecracker_version)"
+KERNEL_VER="$(yaml_get kernel_version)"
+BUSYBOX_VER="$(yaml_get busybox_version)"
 
 FC_DIR="${OUT_DIR}/firecrackers/${FC_VER}/amd64"
 KERNEL_DIR="${OUT_DIR}/kernels/${KERNEL_VER}/amd64"
@@ -108,4 +107,6 @@ MANIFEST="${OUT_DIR}/artifacts-SHA256SUMS"
   sha256sum -c artifacts-SHA256SUMS
 )
 
+SUCCESS=true
+trap - EXIT
 printf 'mirror-e2b-artifacts: ok -> %s\n' "${OUT_DIR}"

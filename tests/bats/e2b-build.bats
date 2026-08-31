@@ -87,6 +87,21 @@ with open(dest, "w", encoding="utf-8") as fh:
 ' "${VERSIONS_FILE}" "${dest}" "$@"
 }
 
+fixture_go_version() {
+  python3 -c '
+import sys
+import yaml
+print(yaml.safe_load(open(sys.argv[1], encoding="utf-8"))["e2b_go_version"])
+' "$1"
+}
+
+write_gowork() {
+  local src="$1"
+  local ver="$2"
+  mkdir -p "${src}"
+  printf 'go %s\n' "${ver}" >"${src}/go.work"
+}
+
 @test "build.sh aborts when e2b.pin and versions.yml e2b_pin disagree" {
   local versions pin
   versions="${TEST_TMPDIR}/versions.yml"
@@ -154,6 +169,7 @@ with open(dest, "w", encoding="utf-8") as fh:
 
   src="${TEST_TMPDIR}/src"
   mkdir -p "${src}"
+  write_gowork "${src}" "$(fixture_go_version "${versions}")"
   dist="${TEST_TMPDIR}/dist"
 
   run "${BUILD_SH}" \
@@ -216,6 +232,7 @@ with open(dest, "w", encoding="utf-8") as fh:
 
   src="${TEST_TMPDIR}/src"
   mkdir -p "${src}"
+  write_gowork "${src}" "$(fixture_go_version "${versions}")"
   dist="${TEST_TMPDIR}/dist"
 
   run "${BUILD_SH}" \
@@ -246,8 +263,97 @@ with open(dest, "w", encoding="utf-8") as fh:
   local dockerfile="${REPO_ROOT}/e2b/build/Dockerfile.build"
   grep -q 'ARG GO_VERSION' "${dockerfile}"
   grep -qF 'FROM golang:${GO_VERSION}-bookworm' "${dockerfile}"
+  grep -q 'GOTOOLCHAIN=local' "${dockerfile}"
   if grep -E 'golang:[0-9]|ARG[[:space:]]+GO_VERSION=' "${dockerfile}"; then
     echo "hard-coded Go version found in Dockerfile.build" >&2
     return 1
   fi
+}
+
+@test "go.work matching e2b_go_version (same major.minor, pin >= directive) passes" {
+  local versions pin patches src dist
+  versions="${TEST_TMPDIR}/versions.yml"
+  pin="${TEST_TMPDIR}/e2b.pin"
+  write_versions_fixture "${versions}" \
+    "e2b_pin=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+    "e2b_dist_version=aaaaaaa" \
+    "e2b_go_version=9.99.99"
+  printf '%s\n' "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" >"${pin}"
+  export GIT_STUB_HEAD="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+  patches="${TEST_TMPDIR}/patches"
+  mkdir -p "${patches}"
+  src="${TEST_TMPDIR}/src"
+  # go 9.99 (no patch) must be accepted by pin 9.99.99 — not exact-string equality.
+  write_gowork "${src}" "9.99"
+  dist="${TEST_TMPDIR}/dist"
+
+  run "${BUILD_SH}" \
+    --src "${src}" \
+    --versions "${versions}" \
+    --pin-file "${pin}" \
+    --patches "${patches}" \
+    --dist "${dist}"
+  [ "$status" -eq 0 ]
+  [ -s "${DOCKER_STUB_LOG}" ]
+  grep -q 'GOTOOLCHAIN=local' "${DOCKER_STUB_LOG}"
+}
+
+@test "go.work that differs from e2b_go_version aborts and names both versions" {
+  local versions pin patches src dist
+  versions="${TEST_TMPDIR}/versions.yml"
+  pin="${TEST_TMPDIR}/e2b.pin"
+  write_versions_fixture "${versions}" \
+    "e2b_pin=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+    "e2b_dist_version=aaaaaaa" \
+    "e2b_go_version=9.99.99"
+  printf '%s\n' "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" >"${pin}"
+  export GIT_STUB_HEAD="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+  patches="${TEST_TMPDIR}/patches"
+  mkdir -p "${patches}"
+  src="${TEST_TMPDIR}/src"
+  write_gowork "${src}" "8.88.88"
+  dist="${TEST_TMPDIR}/dist"
+
+  run "${BUILD_SH}" \
+    --src "${src}" \
+    --versions "${versions}" \
+    --pin-file "${pin}" \
+    --patches "${patches}" \
+    --dist "${dist}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"9.99.99"* ]]
+  [[ "$output" == *"8.88.88"* ]]
+  [[ "$output" == *"update versions.yml"* ]]
+  [ ! -s "${DOCKER_STUB_LOG}" ]
+}
+
+@test "go.work patch newer than e2b_go_version aborts (pin does not satisfy minimum)" {
+  local versions pin patches src dist
+  versions="${TEST_TMPDIR}/versions.yml"
+  pin="${TEST_TMPDIR}/e2b.pin"
+  write_versions_fixture "${versions}" \
+    "e2b_pin=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+    "e2b_dist_version=aaaaaaa" \
+    "e2b_go_version=9.99.99"
+  printf '%s\n' "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" >"${pin}"
+  export GIT_STUB_HEAD="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+  patches="${TEST_TMPDIR}/patches"
+  mkdir -p "${patches}"
+  src="${TEST_TMPDIR}/src"
+  write_gowork "${src}" "9.99.100"
+  dist="${TEST_TMPDIR}/dist"
+
+  run "${BUILD_SH}" \
+    --src "${src}" \
+    --versions "${versions}" \
+    --pin-file "${pin}" \
+    --patches "${patches}" \
+    --dist "${dist}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"9.99.99"* ]]
+  [[ "$output" == *"9.99.100"* ]]
+  [ ! -s "${DOCKER_STUB_LOG}" ]
 }

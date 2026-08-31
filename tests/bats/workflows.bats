@@ -81,12 +81,78 @@ for key in (
     "node_version",
     "e2b_sdk_version",
     "kodus_graph_version",
+    "actionlint_version",
+    "actionlint_sha256",
+    "ansible_core_version",
+    "ansible_lint_version",
+    "yamllint_version",
+    "shellcheck_apt_version",
+    "bats_apt_version",
+    "node_ci_version",
 ):
     text = str(versions[key])
     if len(text) < 5:
         continue
     if text in workflow_text:
         errors.append(f"literal for {key!r} ({text!r}) found in workflows")
+
+if errors:
+    print("\n".join(errors))
+    raise SystemExit(1)
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "workflows do not pip install PyYAML" {
+  run python3 - "${WORKFLOWS_DIR}" <<'PY'
+import sys
+from pathlib import Path
+
+errors = []
+for path in sorted(Path(sys.argv[1]).glob("*.yml")):
+    text = path.read_text(encoding="utf-8")
+    if "pyyaml" in text.lower() or "PyYAML" in text:
+        errors.append(f"{path}: references PyYAML pip install")
+
+if errors:
+    print("\n".join(errors))
+    raise SystemExit(1)
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "lint workflow installs make check toolchain via ci/install-lint-tools.sh" {
+  run grep -F './ci/install-lint-tools.sh' "${WORKFLOWS_DIR}/lint.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "build-e2b workflow packs mirrored artifacts before release" {
+  run grep -F 'ci/pack-mirrored-artifacts.sh' "${WORKFLOWS_DIR}/build-e2b.yml"
+  [ "$status" -eq 0 ]
+  run grep -F 'ci/stage-release.sh' "${WORKFLOWS_DIR}/build-e2b.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "ci scripts read versions.yml without PyYAML" {
+  run python3 - "${REPO_ROOT}/ci" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+ci = Path(sys.argv[1])
+errors = []
+for path in sorted(ci.glob("*.py")):
+    text = path.read_text(encoding="utf-8")
+    if re.search(r"(^|\n)import yaml\b", text) or re.search(r"(^|\n)from yaml\b", text):
+        errors.append(f"{path}: imports PyYAML")
+for path in sorted(ci.glob("*.sh")):
+    text = path.read_text(encoding="utf-8")
+    if "pyyaml" in text.lower():
+        errors.append(f"{path}: references pyyaml")
 
 if errors:
     print("\n".join(errors))

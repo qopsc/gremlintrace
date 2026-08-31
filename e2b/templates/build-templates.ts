@@ -43,7 +43,7 @@ export class ConfigError extends Error {
 
 export interface ConnectionOpts {
   apiKey: string;
-  apiUrl?: string;
+  apiUrl: string;
   domain?: string;
 }
 
@@ -53,6 +53,83 @@ export function isForceEnabled(env: NodeJS.ProcessEnv): boolean {
     return false;
   }
   return ['1', 'true', 'yes'].includes(raw.trim().toLowerCase());
+}
+
+const E2B_CLOUD_ROOT = 'e2b.app';
+
+/**
+ * A hostname targets E2B Cloud iff, after lowercasing and stripping a trailing
+ * DNS dot, it is exactly `e2b.app` or a DNS child of that apex
+ * (`host === 'e2b.app' || host.endsWith('.e2b.app')`).
+ *
+ * The comparison is against `URL.hostname` (or a bare domain parsed through
+ * `new URL`) only — never against the raw string — so a query like
+ * `https://evil.com/?x=e2b.app` is not Cloud, and
+ * `https://api.e2b.app.customer.net` is not Cloud (its host is
+ * `api.e2b.app.customer.net`, which is not a child of `e2b.app`).
+ */
+export function isE2BCloudHostname(hostname: string): boolean {
+  const host = normalizeHostname(hostname);
+  return host === E2B_CLOUD_ROOT || host.endsWith(`.${E2B_CLOUD_ROOT}`);
+}
+
+function normalizeHostname(hostname: string): string {
+  return hostname.trim().toLowerCase().replace(/\.+$/, '');
+}
+
+function parseHttpApiUrl(raw: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ConfigError(
+      `Malformed ${ENV_API_URL}=${raw}. Must be an absolute http(s) URL ` +
+        `(example: http://127.0.0.1:8080). Refusing to build.`,
+      [ENV_API_URL],
+    );
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new ConfigError(
+      `Malformed ${ENV_API_URL}=${raw}. Scheme must be http or https, got ${parsed.protocol}. ` +
+        `Refusing to build.`,
+      [ENV_API_URL],
+    );
+  }
+  if (!parsed.hostname) {
+    throw new ConfigError(
+      `Malformed ${ENV_API_URL}=${raw}. URL has no hostname. Refusing to build.`,
+      [ENV_API_URL],
+    );
+  }
+  return parsed;
+}
+
+function hostnameFromDomainValue(raw: string): string {
+  try {
+    const parsed = raw.includes('://') ? new URL(raw) : new URL(`http://${raw}`);
+    if (!parsed.hostname) {
+      throw new Error('empty hostname');
+    }
+    return parsed.hostname;
+  } catch {
+    throw new ConfigError(
+      `Malformed ${ENV_DOMAIN}=${raw}. Must be a hostname (example: e2b.example.com). Refusing to build.`,
+      [ENV_DOMAIN],
+    );
+  }
+}
+
+function refuseCloud(envName: string, rawValue: string, hostname: string): void {
+  const host = normalizeHostname(hostname);
+  if (!isE2BCloudHostname(host)) {
+    return;
+  }
+  throw new ConfigError(
+    `${envName}=${rawValue} (hostname ${host}) targets E2B Cloud. ` +
+      `Build refused because it would have targeted E2B Cloud. ` +
+      `Set ${ENV_API_URL}=http://127.0.0.1:8080 for the local cluster.`,
+    [envName],
+  );
 }
 
 export function parseConnection(env: NodeJS.ProcessEnv): ConnectionOpts {
@@ -65,9 +142,9 @@ export function parseConnection(env: NodeJS.ProcessEnv): ConnectionOpts {
     );
   }
 
-  const apiUrl = env[ENV_API_URL]?.trim() || undefined;
-  const domain = env[ENV_DOMAIN]?.trim() || undefined;
-  if (!apiUrl && !domain) {
+  const apiUrlRaw = env[ENV_API_URL]?.trim() || undefined;
+  const domainRaw = env[ENV_DOMAIN]?.trim() || undefined;
+  if (!apiUrlRaw && !domainRaw) {
     throw new ConfigError(
       `Missing ${ENV_API_URL} or ${ENV_DOMAIN}. ` +
         `Set ${ENV_API_URL}=http://127.0.0.1:8080 for local template builds. ` +
@@ -76,10 +153,24 @@ export function parseConnection(env: NodeJS.ProcessEnv): ConnectionOpts {
     );
   }
 
+  let domainHostname: string | undefined;
+  if (domainRaw) {
+    domainHostname = hostnameFromDomainValue(domainRaw);
+    refuseCloud(ENV_DOMAIN, domainRaw, domainHostname);
+  }
+  if (apiUrlRaw) {
+    const parsed = parseHttpApiUrl(apiUrlRaw);
+    refuseCloud(ENV_API_URL, apiUrlRaw, parsed.hostname);
+  }
+
+  // SDK ConnectionConfig: `opts.apiUrl || process.env.E2B_API_URL || https://api.${domain}`.
+  // A truthy opts.apiUrl is required to stop a leftover process env from winning.
+  const apiUrl = apiUrlRaw ?? `https://api.${domainHostname}`;
+
   return {
     apiKey,
-    ...(apiUrl ? { apiUrl } : {}),
-    ...(domain ? { domain } : {}),
+    apiUrl,
+    ...(domainRaw ? { domain: domainRaw } : {}),
   };
 }
 

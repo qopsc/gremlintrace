@@ -13,6 +13,10 @@ die() {
   exit 1
 }
 
+yaml_get() {
+  python3 "${REPO_ROOT}/ci/yaml_versions.py" get "$1" "${VERSIONS_FILE}"
+}
+
 latest_upstream_sha() {
   git ls-remote "${UPSTREAM_URL}" HEAD | awk 'NR==1 {print $1}'
 }
@@ -27,7 +31,12 @@ parse_goose_version() {
   sed -n 's/^[[:space:]]*github.com\/pressly\/goose\/v3[[:space:]]\{1,\}\(v[^[:space:]]*\).*/\1/p' "${f}" | head -n 1
 }
 
-current_pin="$(python3 -c 'import yaml; print(yaml.safe_load(open("'"${VERSIONS_FILE}"'"))["e2b_pin"])')"
+parse_gowork_go() {
+  local f="$1"
+  sed -n 's/^[[:space:]]*go[[:space:]]\{1,\}\([0-9][0-9.]*\).*/\1/p' "${f}" | head -n 1
+}
+
+current_pin="$(yaml_get e2b_pin)"
 latest="$(latest_upstream_sha)"
 [[ -n "${latest}" ]] || die "could not resolve upstream HEAD"
 
@@ -47,22 +56,17 @@ envd_ver="$(parse_envd_version "${work}/infra/packages/envd/pkg/version.go")"
 [[ -n "${envd_ver}" ]] || die "could not parse envd version"
 goose_ver="$(parse_goose_version "${work}/infra/packages/db/go.mod")"
 [[ -n "${goose_ver}" ]] || die "could not parse goose version"
+go_ver="$(parse_gowork_go "${work}/infra/go.work")"
+[[ -n "${go_ver}" ]] || die "could not parse go.work go directive"
 dist_ver="${latest:0:7}"
 
-python3 - "${VERSIONS_FILE}" "${latest}" "${dist_ver}" "${envd_ver}" "${goose_ver}" <<'PY'
-import sys
-import yaml
-
-path, pin, dist, envd, goose = sys.argv[1:6]
-with open(path, encoding="utf-8") as fh:
-    data = yaml.safe_load(fh)
-data["e2b_pin"] = pin
-data["e2b_dist_version"] = dist
-data["envd_version"] = envd
-data["goose_version"] = goose
-with open(path, "w", encoding="utf-8") as fh:
-    yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
-PY
+python3 "${REPO_ROOT}/ci/yaml_versions.py" update "${VERSIONS_FILE}" \
+  "e2b_pin=${latest}" \
+  "e2b_dist_version=${dist_ver}" \
+  "envd_version=${envd_ver}" \
+  "goose_version=${goose_ver}" \
+  "e2b_go_version=${go_ver}"
 
 printf '%s\n' "${latest}" >"${PIN_FILE}"
-printf 'bump-e2b-pin: %s -> %s (envd=%s goose=%s)\n' "${current_pin}" "${latest}" "${envd_ver}" "${goose_ver}"
+printf 'bump-e2b-pin: %s -> %s (go=%s envd=%s goose=%s)\n' \
+  "${current_pin}" "${latest}" "${go_ver}" "${envd_ver}" "${goose_ver}"
