@@ -2,7 +2,6 @@
 # Host prep for the installer-matrix leg: modules, sysctl, DNS, TLS, probe targets.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOMAIN="${QOPS_CI_DOMAIN:-ci.qops.test}"
 TLS_DIR="/etc/qops/ci-tls"
 HOSTS_MARKER="# qops-ci-matrix"
