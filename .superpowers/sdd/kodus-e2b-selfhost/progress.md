@@ -48,13 +48,17 @@ breaker and the controller adjudicates.
 
 | PR | Branch | Tasks | Status |
 |---|---|---|---|
-| 1 | `cursor/foundation-skeleton-2bb0` | 1 | in progress |
-| 2 | `cursor/e2b-build-pipeline-2bb0` | 2, 3, 4 | pending |
-| 3 | `cursor/ansible-host-base-roles-2bb0` | 5, 6 | pending |
-| 4 | `cursor/ansible-e2b-services-traefik-2bb0` | 7, 8 | pending |
-| 5 | `cursor/ansible-kodus-doctor-2bb0` | 9, 10 | pending |
-| 6 | `cursor/operations-ci-docs-2bb0` | 11, 12, 13 | pending |
+| 1 | `cursor/foundation-skeleton-2bb0` | 1 | merged to stack; https://github.com/qopsc/gremlintrace/pull/1 |
+| 2 | `cursor/e2b-build-pipeline-2bb0` | 2, 3, 4 | merged to stack; https://github.com/qopsc/gremlintrace/pull/2 |
+| 3 | `cursor/ansible-host-base-roles-2bb0` | 5, 6 | merged to stack; https://github.com/qopsc/gremlintrace/pull/3 |
+| 4 | `cursor/ansible-e2b-services-traefik-2bb0` | 7, 8 | merged to stack; https://github.com/qopsc/gremlintrace/pull/4 |
+| 5 | `cursor/ansible-kodus-doctor-2bb0` | 9, 10 | merged to stack; https://github.com/qopsc/gremlintrace/pull/5 |
+| 6 | `cursor/operations-ci-docs-2bb0` | 11, 12, 13 | merged to stack; https://github.com/qopsc/gremlintrace/pull/6 |
+
+Final whole-branch review (`gpt-5.6-sol-xhigh`): APPROVE. `make check` green: 203 bats, 29 vitest, ansible-lint production, actionlint.
+
+Phase 0 spike, live host install, live FORCE_STOP marker observation, live GC against Postgres, and the GitHub Actions matrix run remain **unverified**.
 
 ## Task ledger
 
-_(appended as tasks complete)_
+All 13 M1 tasks implemented, reviewed, and stacked. See the six PRs.
