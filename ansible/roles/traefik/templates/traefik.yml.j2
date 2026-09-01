@@ -1,0 +1,45 @@
+---
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: "{{ traefik_entry_web }}"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: "{{ traefik_entry_websecure }}"
+    transport:
+      respondingTimeouts:
+        readTimeout: {{ traefik_websecure_read_timeout }}
+        writeTimeout: {{ traefik_websecure_write_timeout }}
+        idleTimeout: {{ traefik_websecure_idle_timeout }}
+
+serversTransport:
+  forwardingTimeouts:
+    dialTimeout: {{ traefik_dial_timeout }}
+    responseHeaderTimeout: {{ traefik_response_header_timeout }}
+    idleConnTimeout: {{ traefik_idle_conn_timeout }}
+
+providers:
+  file:
+    directory: {{ traefik_dynamic_config_dir }}
+    watch: true
+
+{% if tls_mode == "acme_dns" %}
+certificatesResolvers:
+  {{ traefik_cert_resolver }}:
+    acme:
+      email: {{ traefik_acme_email }}
+      storage: {{ traefik_acme_storage }}
+      dnsChallenge:
+        provider: {{ tls_acme_dns_provider }}
+{% endif %}
+
+log:
+  level: INFO
