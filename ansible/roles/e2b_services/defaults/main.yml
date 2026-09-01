@@ -81,3 +81,4 @@ e2b_services_health_retries: 60
 e2b_services_health_delay_seconds: 2
 e2b_services_base_tier_concurrent_sandboxes: 20
 e2b_services_addon_name: qops-concurrency
+e2b_services_seeded_key_file: "{{ e2b_services_config_dir }}/seeded-api-key"

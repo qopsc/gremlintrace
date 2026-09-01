@@ -23,6 +23,7 @@ export type TemplateAction = 'built' | 'skipped' | 'failed';
 
 export interface TemplateResult {
   alias: string;
+  templateId: string | null;
   action: TemplateAction;
   buildId: string | null;
 }
@@ -191,7 +192,7 @@ async function buildOne(
   const exists = await Template.exists(spec.alias, connection);
   if (exists && !force) {
     process.stderr.write(`skip ${spec.alias}: alias already exists\n`);
-    return { alias: spec.alias, action: 'skipped', buildId: null };
+    return { alias: spec.alias, templateId: null, action: 'skipped', buildId: null };
   }
 
   if (exists && force) {
@@ -209,7 +210,17 @@ async function buildOne(
     onBuildLogs: streamBuildLog,
   });
 
-  return { alias: spec.alias, action: 'built', buildId: info.buildId };
+  return {
+    alias: spec.alias,
+    templateId: templateIdFromBuildInfo(info),
+    action: 'built',
+    buildId: info.buildId,
+  };
+}
+
+function templateIdFromBuildInfo(info: { templateId?: unknown }): string | null {
+  const value = info.templateId;
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 export async function runBuildTemplates(
@@ -237,7 +248,7 @@ export async function runBuildTemplates(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(`build failed for ${spec.alias}: ${message}\n`);
-      results.push({ alias: spec.alias, action: 'failed', buildId: null });
+      results.push({ alias: spec.alias, templateId: null, action: 'failed', buildId: null });
       failed = true;
     }
   }

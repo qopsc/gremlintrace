@@ -6,7 +6,10 @@ e2b_templates_aliases:
   - kodus-sandbox-graph
 e2b_templates_force: false
 e2b_templates_install_dir: /usr/local/lib/qops/e2b-templates
-e2b_templates_src_dir: "{{ playbook_dir }}/../../e2b/templates"
+# Controller-side path (playbook_dir). Copied onto the managed host before any
+# host-side command reads the sources.
+e2b_templates_controller_src_dir: "{{ playbook_dir }}/../../e2b/templates"
+e2b_templates_src_dir: /var/cache/qops/e2b-templates-src
 e2b_templates_domain: "e2b.{{ qops_domain }}"
 e2b_templates_base_image: ""
 e2b_templates_summary_path: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}/templates-last-summary.json"

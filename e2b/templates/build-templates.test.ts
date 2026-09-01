@@ -67,7 +67,12 @@ function lastJsonLine(stdout: string[]): BuildSummary {
 }
 
 interface BuildSummary {
-  templates: Array<{ alias: string; action: string; buildId: string | null }>;
+  templates: Array<{
+    alias: string;
+    templateId: string | null;
+    action: string;
+    buildId: string | null;
+  }>;
 }
 
 function buildCalls(): Array<{ name: string; options: Record<string, unknown> }> {
@@ -162,9 +167,14 @@ describe('runBuildTemplates', () => {
     expect(exitCode).toBe(EXIT_OK);
     expect(buildCalls().map((call) => call.name)).toEqual(['base', 'kodus-sandbox-graph']);
     expect(summary.templates).toEqual([
-      { alias: 'base', action: 'built', buildId: 'bld_base' },
-      { alias: 'kodus-sandbox', action: 'skipped', buildId: null },
-      { alias: 'kodus-sandbox-graph', action: 'built', buildId: 'bld_kodus-sandbox-graph' },
+      { alias: 'base', templateId: 'tpl_base', action: 'built', buildId: 'bld_base' },
+      { alias: 'kodus-sandbox', templateId: null, action: 'skipped', buildId: null },
+      {
+        alias: 'kodus-sandbox-graph',
+        templateId: 'tpl_kodus-sandbox-graph',
+        action: 'built',
+        buildId: 'bld_kodus-sandbox-graph',
+      },
     ]);
   });
 
@@ -313,9 +323,19 @@ describe('runBuildTemplates', () => {
     const parsed = lastJsonLine(stdout);
     expect(parsed).toEqual({
       templates: [
-        { alias: 'base', action: 'skipped', buildId: null },
-        { alias: 'kodus-sandbox', action: 'built', buildId: 'bld_kodus-sandbox' },
-        { alias: 'kodus-sandbox-graph', action: 'built', buildId: 'bld_kodus-sandbox-graph' },
+        { alias: 'base', templateId: null, action: 'skipped', buildId: null },
+        {
+          alias: 'kodus-sandbox',
+          templateId: 'tpl_kodus-sandbox',
+          action: 'built',
+          buildId: 'bld_kodus-sandbox',
+        },
+        {
+          alias: 'kodus-sandbox-graph',
+          templateId: 'tpl_kodus-sandbox-graph',
+          action: 'built',
+          buildId: 'bld_kodus-sandbox-graph',
+        },
       ],
     });
   });
@@ -339,9 +359,14 @@ describe('runBuildTemplates', () => {
     expect(failed.exitCode).toBe(EXIT_BUILD_FAILED);
     expect(failed.exitCode).not.toBe(EXIT_OK);
     expect(failed.summary.templates).toEqual([
-      { alias: 'base', action: 'built', buildId: 'bld_base' },
-      { alias: 'kodus-sandbox', action: 'failed', buildId: null },
-      { alias: 'kodus-sandbox-graph', action: 'built', buildId: 'bld_kodus-sandbox-graph' },
+      { alias: 'base', templateId: 'tpl_base', action: 'built', buildId: 'bld_base' },
+      { alias: 'kodus-sandbox', templateId: null, action: 'failed', buildId: null },
+      {
+        alias: 'kodus-sandbox-graph',
+        templateId: 'tpl_kodus-sandbox-graph',
+        action: 'built',
+        buildId: 'bld_kodus-sandbox-graph',
+      },
     ]);
 
     mockTemplate.build.mockImplementation(async (_template: unknown, name: string) => ({

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Remove Local-registry templateId:buildId images that are not in the latest summary.
+# Remove Local-registry templateId:buildId images that are not in the latest
+# summary. Aliases are not Docker repositories; Local-registry tags are
+# templateId:buildId. A requested docker rmi failure fails the play.
 set -euo pipefail
 
 SUMMARY_PATH="${1:?summary json required}"
@@ -24,15 +26,14 @@ import sys
 summary_path, docker_bin = sys.argv[1], sys.argv[2]
 data = json.load(open(summary_path, encoding="utf-8"))
 keep = set()
-aliases = set()
+template_ids = set()
 for row in data.get("templates", []):
-    alias = row.get("alias")
-    if alias:
-        aliases.add(alias)
+    template_id = row.get("templateId")
     build_id = row.get("buildId")
-    if row.get("action") == "built" and build_id:
-        keep.add(f"{alias}:{build_id}")
-        keep.add(build_id)
+    if template_id:
+        template_ids.add(template_id)
+    if template_id and build_id:
+        keep.add(f"{template_id}:{build_id}")
 
 if not keep:
     print("unchanged")
@@ -56,17 +57,15 @@ for image in listed.stdout.splitlines():
     repo, _, tag = image.rpartition(":")
     if not tag or tag == "<none>":
         continue
-    if repo not in aliases and tag not in keep:
+    if repo not in template_ids:
         continue
-    if image in keep or tag in keep:
-        continue
-    if repo not in aliases:
+    if image in keep:
         continue
     rm = subprocess.run([docker_bin, "rmi", "-f", image], check=False, capture_output=True, text=True)
-    if rm.returncode == 0:
-        removed += 1
-    else:
-        sys.stderr.write(rm.stderr)
+    if rm.returncode != 0:
+        sys.stderr.write(rm.stderr or f"docker rmi failed for {image}\n")
+        raise SystemExit(rm.returncode or 1)
+    removed += 1
 
 print("changed" if removed else "unchanged")
 PY

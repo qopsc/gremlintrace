@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Set KEY=value in a dotenv file without printing the value.
+# Writes atomically: temp file in the same directory, mode 0600, then rename.
 set -euo pipefail
 
 FILE="${1:?secrets file required}"
@@ -12,8 +13,10 @@ if [[ ! -f "${FILE}" ]]; then
 fi
 
 python3 - "${FILE}" "${KEY}" "${VALUE}" <<'PY'
+import os
 import pathlib
 import sys
+import tempfile
 
 path = pathlib.Path(sys.argv[1])
 key = sys.argv[2]
@@ -32,6 +35,19 @@ if not found:
     if out and not out[-1].endswith("\n"):
         out[-1] += "\n"
     out.append(f"{key}={value}\n")
-path.write_text("".join(out), encoding="utf-8")
+
+fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write("".join(out))
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+except Exception:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    raise
 PY
 echo updated

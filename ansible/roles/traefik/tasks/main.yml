@@ -8,7 +8,10 @@
     group: root
   loop:
     - check-tls-mode.sh
+    - check-provided-tls.sh
     - install-traefik.sh
+    - install-traefik-acme-env.sh
+    - validate-traefik-limits.py
     - verify-traefik.sh
     - hairpin-check.sh
   tags:
@@ -32,12 +35,22 @@
     - traefik
 
 - name: Require certificate files when tls_mode is provided
-  ansible.builtin.assert:
-    that:
-      - tls_cert_path | length > 0
-      - tls_key_path | length > 0
-    fail_msg: tls_mode=provided requires tls_cert_path and tls_key_path
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/check-provided-tls.sh {{ tls_cert_path }} {{ tls_key_path }}
   when: tls_mode == "provided"
+  changed_when: false
+  tags:
+    - traefik
+
+- name: Enforce load-bearing Traefik timeout and body-size bounds
+  ansible.builtin.command:
+    cmd: >-
+      python3 /usr/local/lib/qops/validate-traefik-limits.py
+      {{ traefik_idle_conn_timeout }}
+      {{ traefik_api_max_request_body_bytes }}
+      {{ traefik_idle_conn_timeout_max }}
+      {{ traefik_api_min_request_body_bytes }}
+  changed_when: false
   tags:
     - traefik
 
@@ -59,19 +72,28 @@
   tags:
     - traefik
 
-- name: Ensure traefik directories exist
+- name: Ensure root-owned Traefik directories exist
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ traefik_user }}"
-    group: "{{ traefik_group }}"
+    owner: root
+    group: root
     mode: "0755"
   loop:
     - "{{ traefik_config_dir }}"
     - "{{ traefik_dynamic_config_dir }}"
-    - "{{ traefik_state_dir }}"
     - "{{ traefik_cache_dir }}"
     - "{{ traefik_install_dir }}"
+  tags:
+    - traefik
+
+- name: Ensure Traefik state directory is writable by Traefik
+  ansible.builtin.file:
+    path: "{{ traefik_state_dir }}"
+    state: directory
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0750"
   tags:
     - traefik
 
@@ -167,8 +189,8 @@
   ansible.builtin.template:
     src: traefik.yml.j2
     dest: "{{ traefik_static_config }}"
-    owner: "{{ traefik_user }}"
-    group: "{{ traefik_group }}"
+    owner: root
+    group: root
     mode: "0644"
   notify: Restart traefik
   tags:
@@ -178,10 +200,59 @@
   ansible.builtin.template:
     src: dynamic-http.yml.j2
     dest: "{{ traefik_dynamic_config_dir }}/http.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Ensure provided TLS directory exists
+  ansible.builtin.file:
+    path: "{{ traefik_provided_tls_dir }}"
+    state: directory
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0750"
+  when: tls_mode == "provided"
+  tags:
+    - traefik
+
+- name: Install managed TLS certificate copy
+  ansible.builtin.copy:
+    src: "{{ tls_cert_path }}"
+    dest: "{{ traefik_provided_cert_dest }}"
+    remote_src: true
     owner: "{{ traefik_user }}"
     group: "{{ traefik_group }}"
     mode: "0644"
+  when: tls_mode == "provided"
   notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Install managed TLS private key copy
+  ansible.builtin.copy:
+    src: "{{ tls_key_path }}"
+    dest: "{{ traefik_provided_key_dest }}"
+    remote_src: true
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0600"
+  when: tls_mode == "provided"
+  notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Verify managed TLS copies are readable as the Traefik user
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/check-provided-tls.sh
+      {{ traefik_provided_cert_dest }}
+      {{ traefik_provided_key_dest }}
+      {{ traefik_user }}
+  when: tls_mode == "provided"
+  changed_when: false
   tags:
     - traefik
 
@@ -189,11 +260,24 @@
   ansible.builtin.template:
     src: dynamic-tls-provided.yml.j2
     dest: "{{ traefik_dynamic_config_dir }}/tls-provided.yml"
-    owner: "{{ traefik_user }}"
-    group: "{{ traefik_group }}"
+    owner: root
+    group: root
     mode: "0644"
   when: tls_mode == "provided"
   notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Install dedicated Traefik ACME credentials file
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/install-traefik-acme-env.sh
+      {{ common_qops_secrets_file }}
+      {{ traefik_acme_env_file }}
+  when: tls_mode == "acme_dns"
+  register: traefik_acme_env
+  changed_when: (traefik_acme_env.stdout | trim) == "installed"
+  no_log: true
   tags:
     - traefik
 
@@ -245,14 +329,9 @@
   tags:
     - traefik
 
-- name: Hairpin-check api.e2b from the Kodus network when it exists
-  ansible.builtin.command:
-    cmd: >-
-      /usr/local/lib/qops/hairpin-check.sh
-      {{ traefik_kodus_network }}
-      {{ traefik_hairpin_url }}
-      {{ traefik_hairpin_image }}
-  register: traefik_hairpin
-  changed_when: false
+- name: Import first-install hairpin check (skip if the Kodus network is absent)
+  ansible.builtin.include_tasks: hairpin.yml
+  vars:
+    traefik_hairpin_required: false
   tags:
     - traefik

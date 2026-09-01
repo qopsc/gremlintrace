@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Wait for a URL. HTTP 503 is retried (API is 503 until a node is discovered).
+# Wait for a URL. Connection failures and HTTP 503 are retried (the API is 503
+# until a node is discovered). Any other HTTP status fails immediately and
+# prints the status and body.
 set -euo pipefail
 
 URL="${1:?url required}"
@@ -39,13 +41,22 @@ PY
     body_file="$(mktemp)"
     err_file="$(mktemp)"
     set +e
-    body="$(curl -sS -o "${body_file}" -w '%{http_code}' --max-time 5 "${URL}" 2>"${err_file}")"
+    status="$(curl -sS -o "${body_file}" -w '%{http_code}' --max-time 5 "${URL}" 2>"${err_file}")"
     curl_rc=$?
     set -e
-    rm -f "${body_file}" "${err_file}"
-    if [[ "${curl_rc}" -eq 0 && "${body}" == "200" ]]; then
+    if [[ "${curl_rc}" -ne 0 ]]; then
+      rm -f "${body_file}" "${err_file}"
+    elif [[ "${status}" == "200" ]]; then
+      rm -f "${body_file}" "${err_file}"
       echo ready
       exit 0
+    elif [[ "${status}" == "503" ]]; then
+      rm -f "${body_file}" "${err_file}"
+    else
+      echo "health check for ${URL} failed with HTTP ${status} (not retrying)" >&2
+      cat "${body_file}" >&2 || true
+      rm -f "${body_file}" "${err_file}"
+      exit 1
     fi
   fi
   attempt=$((attempt + 1))

@@ -1,5 +1,9 @@
 [Unit]
 Description=E2B client-proxy
+# The client-proxy binary binds all interfaces on 3002 (edge) and 3003
+# (health) by design. Host nftables input is policy drop (loopback,
+# established, 22/80/443, and veth redirect targets only), so those
+# listeners are not reachable from the network.
 Wants=network-online.target
 After=e2b-orchestrator.service network-online.target
 Requires=e2b-orchestrator.service
