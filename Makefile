@@ -30,6 +30,7 @@ lint: syntax-check templates-ci
 	ansible/roles/backup/files/qops-backup \
 	ansible/roles/backup/files/qops-e2b-gc-wrapper \
 	ansible/roles/backup/files/e2b-gc-query.sh \
+	ansible/roles/backup/files/e2b-gc-lock.sh \
 	ansible/roles/backup/files/qops-uninstall.sh \
 	ansible/roles/e2b_services/files/e2b-cleanup-runtime.sh
 	npm --prefix $(TEMPLATES_DIR) run typecheck

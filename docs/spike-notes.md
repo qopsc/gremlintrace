@@ -2,6 +2,19 @@
 
 **Phase 0 has not been executed.** There is no KVM-capable lab host in this development environment. Every exit criterion below is **unchecked**. Do not treat M1 installer code or CI as a substitute for this gate on nested-virt or bare-metal hardware.
 
+Unchecked Phase 0 gates (must remain until the lab run):
+
+- [ ] E2B API log shows sandbox from Kodus worker on our API (`usedTemplate=false` never)
+- [ ] Review comment on canary PR with cross-file/AST context
+- [ ] ≥ 700 s streamed `commands.run` through public hostname
+- [ ] Isolation probe from sandbox (`:5008` blocked, npm allowed, LAN blocked)
+- [ ] Pause / autoResume / kill disk layout under Local FS
+- [ ] 10 parallel reviews vs `max-starting-instances-per-node=3`
+- [ ] `systemctl restart e2b-orchestrator` under load (no ns/veth/nbd/cgroup leaks)
+- [ ] Nested-virt timings
+- [ ] `ENVIRONMENT=prod` + `SERVICE_DISCOVERY_PROVIDER=local`
+
+
 Record results on the Proxmox VM (Ubuntu 24.04, CPU `host`, nested virt, ≥ 8 vCPU, 32 GiB RAM, 200 GiB disk) when Phase 0 runs.
 
 ## How to use this document
@@ -59,6 +72,8 @@ For each item: mark **PASS / FAIL / SKIP**, date, operator, and measured values.
 
 - **Assumption:** Kill after pause leaves dirs under `LOCAL_TEMPLATE_STORAGE_BASE_PATH/<buildID>/` with memfile/rootfs diffs; nothing upstream deletes on Local FS.
 - **Feeds:** `qops-e2b-gc` retention (`e2b_snapshot_retention_hours`).
+- **Live IDs:** storage keys are `env_build_assignments.build_id` for live templates (`envs.deleted_at IS NULL`) and live snapshots (`snapshots.env_id`). `snapshots.id` is a row UUID, not a storage key.
+- **Header-chain walking:** on-disk headers can name parent `build_id`s. Parsing those headers reliably is **not implemented**. GC keeps the conservative assigned-`build_id` set only. Deleting an ancestor that a live snapshot header still points at is an **unverified M1 gap** — fail closed by not claiming chain-walking; do not delete based on `snapshots.id`. Live GC against Postgres is **unverified**.
 - **Result:** ☐ unchecked
 
 ### Hairpin NAT

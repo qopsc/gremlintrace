@@ -4,7 +4,7 @@
 
 | Item | M1 status |
 |---|---|
-| Installer target | **Supported** — first and only distro-family path in M1 |
+| Installer target | **Implemented** (unverified) — first and only distro-family path in M1 |
 | CI matrix leg | `installer-matrix.yml` `ubuntu-24.04` on GitHub-hosted runners (KVM available) |
 | `tls_mode` | `acme_dns`, `provided` |
 | `e2b_storage_backend` | `local` only |

@@ -16,3 +16,10 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"not-a-real-playbook"* ]]
 }
+
+@test "docs-accuracy checker fails on a fabricated Phase 0 complete claim" {
+  run python3 "${CHECKER}" --inject-phase-0-complete
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Phase 0"* ]]
+  [[ "$output" == *"Supported"* || "$output" == *"complete"* ]]
+}

@@ -5,8 +5,20 @@
       /usr/local/lib/qops/e2b-set-force-stop.sh
       {{ e2b_services_orchestrator_env }}
       true
+  environment:
+    QOPS_FORCE_STOP_MARKER: "{{ e2b_services_force_stop_marker }}"
   register: e2b_services_force_stop_set
   changed_when: (e2b_services_force_stop_set.stdout | trim) == "changed"
+  tags:
+    - e2b_services
+
+- name: Create /orchestrator/force-stop marker before systemctl stop
+  ansible.builtin.file:
+    path: "{{ e2b_services_force_stop_marker }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
   tags:
     - e2b_services
 
@@ -24,9 +36,16 @@
   tags:
     - e2b_services
 
-- name: Stop e2b-orchestrator after FORCE_STOP=true
+- name: Stop e2b-orchestrator after FORCE_STOP=true and force-stop marker
   ansible.builtin.service:
     name: "{{ e2b_services_orchestrator_unit }}"
     state: stopped
+  tags:
+    - e2b_services
+
+- name: Remove force-stop marker after orchestrator stopped
+  ansible.builtin.file:
+    path: "{{ e2b_services_force_stop_marker }}"
+    state: absent
   tags:
     - e2b_services

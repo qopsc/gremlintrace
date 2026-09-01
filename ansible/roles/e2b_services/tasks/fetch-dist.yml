@@ -29,6 +29,7 @@
     - e2b-wait-health.sh
     - e2b-ensure-node-id.sh
     - e2b-assert-dist-pair.sh
+    - e2b-extract-api-migration-timestamp.sh
     - e2b-compare-upgrade-pins.py
     - e2b-set-force-stop.sh
     - e2b-extract-build-info.sh

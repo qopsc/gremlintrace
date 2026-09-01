@@ -23,7 +23,8 @@ OOMScoreAdjust=-900
 TimeoutStopSec=180
 # Firecracker processes live in /sys/fs/cgroup/e2b/sbx-* outside this unit's
 # cgroup, so systemctl stop drains live sandboxes up to the 35-minute ceiling
-# unless FORCE_STOP=true, which upgrade.yml sets.
+# unless FORCE_STOP=true (startup env) or /orchestrator/force-stop exists at
+# SIGTERM (upgrade.yml writes both before systemctl stop).
 
 [Install]
 WantedBy=multi-user.target

@@ -4,7 +4,7 @@ Repeatable Ansible installer for **[Kodus](https://kodus.io)** (AI code review, 
 
 ## Architecture
 
-Traefik (systemd, the **only** service binding `0.0.0.0:80/443`) terminates TLS and routes `kodus.*`, `api.e2b.*`, and `*.e2b.*` hostnames. Kodus runs in Docker Compose; E2B orchestrator, API, and client-proxy run as host processes with bundled Postgres/Redis/ClickHouse/OTel in Docker on `127.0.0.1`. Sandboxes are Firecracker microVMs on the same node.
+Traefik (systemd) is the **only network-reachable** bind on ports 80/443. E2B Go services hardcode `0.0.0.0` on their own ports and are contained by nftables input-drop. Traefik terminates TLS and routes `kodus.*`, `api.e2b.*`, and `*.e2b.*` hostnames. Kodus runs in Docker Compose; E2B orchestrator, API, and client-proxy run as host processes with bundled Postgres/Redis/ClickHouse/OTel in Docker on `127.0.0.1`. Sandboxes are Firecracker microVMs on the same node.
 
 See [docs/architecture.md](docs/architecture.md) and the [design spec](docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md).
 

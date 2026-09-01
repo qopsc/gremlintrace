@@ -27,6 +27,7 @@ PG_MARKERS = (
     b"SET statement_timeout",
     b"SET standard_conforming_strings",
 )
+PG_TRAILER = b"PostgreSQL database dump complete"
 
 
 def fail(msg: str) -> int:
@@ -42,24 +43,36 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def gunzip_prefix(path: Path, nbytes: int = 4096) -> bytes:
+def gunzip_all(path: Path) -> bytes:
+    """Consume the complete gzip stream. Truncated files raise OSError."""
     with gzip.open(path, "rb") as handle:
-        return handle.read(nbytes)
+        chunks: list[bytes] = []
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        return b"".join(chunks)
 
 
 def check_postgres_dump(path: Path) -> str | None:
     if path.stat().st_size < 32:
         return f"{path.name} is empty or too small"
     try:
-        prefix = gunzip_prefix(path)
-    except OSError as exc:
+        data = gunzip_all(path)
+    except (OSError, EOFError, gzip.BadGzipFile) as exc:
         return f"{path.name} is not a valid gzip: {exc}"
-    if not prefix.strip():
+    if not data.strip():
         return f"{path.name} uncompressed content is empty"
-    if not any(marker in prefix for marker in PG_MARKERS):
+    if not any(marker in data for marker in PG_MARKERS):
         return (
             f"{path.name} does not look like a PostgreSQL dump "
             "(missing dump header)"
+        )
+    if PG_TRAILER not in data:
+        return (
+            f"{path.name} is truncated or header-only "
+            "(missing 'PostgreSQL database dump complete' trailer)"
         )
     return None
 
@@ -68,8 +81,8 @@ def check_gzip_nonempty(path: Path) -> str | None:
     if path.stat().st_size < 16:
         return f"{path.name} is empty or too small"
     try:
-        data = gunzip_prefix(path, 64)
-    except OSError as exc:
+        data = gunzip_all(path)
+    except (OSError, EOFError, gzip.BadGzipFile) as exc:
         return f"{path.name} is not a valid gzip: {exc}"
     if not data:
         return f"{path.name} uncompressed content is empty"

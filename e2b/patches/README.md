@@ -8,15 +8,27 @@ Patches in this directory are applied with `git apply` in CI against the pinned 
 
 ## Naming convention
 
-`NNNN-short-description.patch` (e.g. `0001-env-override-max-sandboxes.patch`).
+`NNNN-short-description.patch` (e.g. `0001-force-stop-marker.patch`).
 
 ## Policy
 
 - Keep patches **minimal** — every patch must be rebased when `e2b_pin` bumps.
-- The directory starts empty; add patches only when upstream behaviour must change.
+- Add patches only when upstream behaviour must change.
 - Do not fork `e2b-dev/infra`; all source changes go here.
 
-## First patch candidate
+## Applied patches
+
+### `0001-force-stop-marker.patch`
+
+Upstream parses `FORCE_STOP` once at process start (`packages/orchestrator/pkg/cfg/model.go`). Shutdown uses the in-memory `config.ForceStop`. Writing the EnvironmentFile then `systemctl stop` does **not** change the running process.
+
+This patch, at shutdown-signal receipt, treats marker file `/orchestrator/force-stop` as `ForceStop=true` (override the startup-parsed value). The env var still applies to processes started with it already set.
+
+**Interface:** empty file, mode `0600`, root-owned, path `/orchestrator/force-stop`. `upgrade.yml` creates it before `systemctl stop` and removes it after a successful stop (or on the subsequent start) so a later ordinary stop still drains.
+
+Live observation of a running orchestrator honoring the marker is **unverified**. The patch is required to `git apply` cleanly against the pinned commit; a stub test covers the decision table without compiling E2B.
+
+## Later patch candidate
 
 Upstream `packages/shared/pkg/featureflags/flags.go` defines:
 

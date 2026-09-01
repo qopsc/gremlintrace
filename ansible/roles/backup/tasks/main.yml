@@ -25,6 +25,8 @@
       dest: qops-e2b-gc
     - src: e2b-gc-query.sh
       dest: e2b-gc-query.sh
+    - src: e2b-gc-lock.sh
+      dest: e2b-gc-lock.sh
     - src: qops-backup-verify
       dest: qops-backup-verify
   tags:

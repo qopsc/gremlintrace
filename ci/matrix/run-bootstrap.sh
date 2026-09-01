@@ -8,6 +8,17 @@ cd "${REPO_ROOT}"
 # shellcheck source=/dev/null
 source /etc/qops/ci-matrix.env
 
+# Isolation probe host-proof uses 10.255.0.1:80 after Traefik binds 0.0.0.0:80.
+# Stop the prepare-host dummy listener so Traefik can take the port.
+LAN_PIDFILE="/run/qops-lan-listener.pid"
+if [[ -f "${LAN_PIDFILE}" ]]; then
+  lan_pid="$(cat "${LAN_PIDFILE}" || true)"
+  if [[ -n "${lan_pid}" ]]; then
+    sudo kill "${lan_pid}" 2>/dev/null || true
+  fi
+  sudo rm -f "${LAN_PIDFILE}"
+fi
+
 EXTRA=(
   -e "qops_domain=${QOPS_CI_DOMAIN}"
   -e "qops_public_ipv4=${QOPS_CI_PUBLIC_IPV4}"

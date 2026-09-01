@@ -118,3 +118,92 @@ EOF
   grep -q 'veth-\*' "${CLEANUP}"
   grep -q '/sys/fs/cgroup/e2b' "${CLEANUP}"
 }
+
+@test "runtime cleanup runs after orchestrator is stopped and verified inactive" {
+  root="${BATS_TEST_TMPDIR:-${BATS_TMPDIR}}/uninstall-order"
+  rm -rf "${root}"
+  mkdir -p "${root}"
+  log="${root}/log"
+  sys="${root}/systemctl"
+  cat >"${sys}" <<EOF
+#!/usr/bin/env bash
+printf 'systemctl %s\n' "\$*" >>"${log}"
+if [[ "\$1" == "is-active" ]]; then
+  printf 'inactive\n'
+fi
+exit 0
+EOF
+  chmod +x "${sys}"
+  cleanup_wrap="${root}/cleanup.sh"
+  cat >"${cleanup_wrap}" <<EOF
+#!/usr/bin/env bash
+printf 'cleanup-start\n' >>"${log}"
+bash "${CLEANUP}"
+printf 'cleanup-end\n' >>"${log}"
+EOF
+  chmod +x "${cleanup_wrap}"
+  run env \
+    QOPS_UNINSTALL_LOG="${log}" \
+    QOPS_UNINSTALL_CLEANUP="${cleanup_wrap}" \
+    QOPS_UNINSTALL_SYSTEMCTL="${sys}" \
+    QOPS_UNINSTALL_DOCKER="/bin/true" \
+    QOPS_UNINSTALL_DATA_PATHS="${root}/data" \
+    QOPS_UNINSTALL_SOFTWARE_PATHS="${root}/software-missing" \
+    QOPS_UNINSTALL_NFT="$(command -v true)" \
+    QOPS_UNINSTALL_IP="$(command -v true)" \
+    QOPS_UNINSTALL_NETNS_DIR="${root}/netns" \
+    QOPS_UNINSTALL_SYS_CLASS_NET="${root}/net" \
+    QOPS_UNINSTALL_CGROUP="${root}/cgroup" \
+    bash "${UNINSTALL}" --confirm
+  [ "$status" -eq 0 ]
+  python3 - "${log}" <<'PY'
+import sys
+text = open(sys.argv[1], encoding="utf-8").read().splitlines()
+stop = next(
+    i
+    for i, line in enumerate(text)
+    if line.startswith("attempt stop") and "e2b-orchestrator" in line
+)
+verified = next(
+    i
+    for i, line in enumerate(text)
+    if line.startswith("verified") and "inactive" in line
+)
+cleanup = next(i for i, line in enumerate(text) if line == "cleanup-start")
+assert stop < verified < cleanup, (stop, verified, cleanup, text)
+print("ok")
+PY
+}
+
+@test "destroy-data is aborted if orchestrator stop fails" {
+  root="${BATS_TMPDIR}/abort-destroy"
+  data="${root}/data"
+  mkdir -p "${data}/keep"
+  printf 'secret\n' >"${data}/keep/x"
+  sys="${root}/systemctl"
+  cat >"${sys}" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "stop" && "$2" == "e2b-orchestrator.service" ]]; then
+  echo "stop failed" >&2
+  exit 1
+fi
+exit 0
+EOF
+  chmod +x "${sys}"
+  run env \
+    QOPS_UNINSTALL_LOG="${root}/log" \
+    QOPS_UNINSTALL_CLEANUP="${CLEANUP}" \
+    QOPS_UNINSTALL_SYSTEMCTL="${sys}" \
+    QOPS_UNINSTALL_DOCKER="/bin/true" \
+    QOPS_UNINSTALL_DATA_PATHS="${data}" \
+    QOPS_UNINSTALL_SOFTWARE_PATHS="${root}/software-missing" \
+    QOPS_UNINSTALL_NFT="$(command -v true)" \
+    QOPS_UNINSTALL_IP="$(command -v true)" \
+    QOPS_UNINSTALL_NETNS_DIR="${root}/netns" \
+    QOPS_UNINSTALL_SYS_CLASS_NET="${root}/net" \
+    QOPS_UNINSTALL_CGROUP="${root}/cgroup" \
+    bash "${UNINSTALL}" --confirm --destroy-data
+  [ "$status" -ne 0 ]
+  [ -d "${data}/keep" ]
+  grep -q 'aborting destroy-data' "${root}/log"
+}

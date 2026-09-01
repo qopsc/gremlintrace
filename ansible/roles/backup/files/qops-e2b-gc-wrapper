@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# qops-e2b-gc wrapper: default the fail-closed DB query when unset.
+# qops-e2b-gc wrapper: default the fail-closed DB query and lock when unset.
 set -euo pipefail
 
 LIB="${QOPS_E2B_GC_LIB:-/usr/local/lib/qops/qops-e2b-gc}"
+PSQL="${QOPS_E2B_GC_PSQL:-/usr/local/lib/qops/e2b-psql.sh}"
+COMPOSE="${QOPS_E2B_GC_COMPOSE:-/etc/qops/e2b-data/docker-compose.yml}"
+SECRETS="${QOPS_E2B_GC_SECRETS:-/etc/qops/secrets.env}"
+PROJECT="${QOPS_E2B_GC_PROJECT:-e2b-data}"
+USER_NAME="${QOPS_E2B_GC_PG_USER:-postgres}"
+DB_NAME="${QOPS_E2B_GC_PG_DB:-e2b}"
 if [[ -z "${QOPS_E2B_GC_QUERY_CMD:-}" ]]; then
-  PSQL="${QOPS_E2B_GC_PSQL:-/usr/local/lib/qops/e2b-psql.sh}"
   QUERY="${QOPS_E2B_GC_QUERY:-/usr/local/lib/qops/e2b-gc-query.sh}"
-  COMPOSE="${QOPS_E2B_GC_COMPOSE:-/etc/qops/e2b-data/docker-compose.yml}"
-  SECRETS="${QOPS_E2B_GC_SECRETS:-/etc/qops/secrets.env}"
-  PROJECT="${QOPS_E2B_GC_PROJECT:-e2b-data}"
-  USER_NAME="${QOPS_E2B_GC_PG_USER:-postgres}"
-  DB_NAME="${QOPS_E2B_GC_PG_DB:-e2b}"
   export QOPS_E2B_GC_QUERY_CMD="${QUERY} ${PSQL} ${COMPOSE} ${SECRETS} ${PROJECT} ${USER_NAME} ${DB_NAME}"
+fi
+if [[ -z "${QOPS_E2B_GC_LOCK_CMD:-}" ]]; then
+  LOCK="${QOPS_E2B_GC_LOCK:-/usr/local/lib/qops/e2b-gc-lock.sh}"
+  export QOPS_E2B_GC_LOCK_CMD="${LOCK} ${PSQL} ${COMPOSE} ${SECRETS} ${PROJECT} ${USER_NAME} ${DB_NAME}"
 fi
 exec python3 "${LIB}" "$@"

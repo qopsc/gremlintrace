@@ -1,11 +1,55 @@
 #!/usr/bin/env bash
-# Set FORCE_STOP in the orchestrator EnvironmentFile. upgrade.yml calls this
-# with true before systemctl stop so Firecracker processes in
-# /sys/fs/cgroup/e2b/sbx-* are not drained for up to 35 minutes.
+# Set FORCE_STOP in the orchestrator EnvironmentFile and manage the
+# /orchestrator/force-stop marker that the patched orchestrator consults at
+# shutdown-signal receipt (FORCE_STOP is parsed once at process start, so
+# rewriting the env file alone does not affect a running process).
+#
+# Interface:
+#   Marker path: ${QOPS_FORCE_STOP_MARKER:-/orchestrator/force-stop}
+#   Empty file, mode 0600, root-owned when created as root.
+#   Presence at SIGTERM => treat as ForceStop=true. Keep FORCE_STOP=true in
+#   the env file so a restart also force-stops. Remove the marker after a
+#   successful stop (or on the subsequent start) so an ordinary later stop
+#   still drains.
 set -euo pipefail
 
-ENV_FILE="${1:?orchestrator env file required}"
-VALUE="${2:?true or false required}"
+MARKER="${QOPS_FORCE_STOP_MARKER:-/orchestrator/force-stop}"
+
+usage() {
+  echo "usage: e2b-set-force-stop.sh ENV_FILE true|false | --clear-marker" >&2
+  exit 2
+}
+
+create_marker() {
+  local dir
+  dir="$(dirname "${MARKER}")"
+  if [[ ! -d "${dir}" ]]; then
+    echo "force-stop marker directory missing: ${dir}" >&2
+    exit 1
+  fi
+  umask 077
+  : >"${MARKER}"
+  chmod 0600 "${MARKER}"
+  if [[ "$(id -u)" -eq 0 ]]; then
+    chown root:root "${MARKER}"
+  fi
+}
+
+clear_marker() {
+  rm -f "${MARKER}"
+}
+
+if [[ "${1:-}" == "--clear-marker" ]]; then
+  clear_marker
+  echo "cleared"
+  exit 0
+fi
+
+ENV_FILE="${1:-}"
+VALUE="${2:-}"
+if [[ -z "${ENV_FILE}" || -z "${VALUE}" ]]; then
+  usage
+fi
 
 case "${VALUE}" in
   true|false) ;;
@@ -45,3 +89,9 @@ if not found:
 path.write_text("\n".join(out) + "\n", encoding="utf-8")
 print("changed" if changed else "unchanged")
 PY
+
+if [[ "${VALUE}" == "true" ]]; then
+  create_marker
+else
+  clear_marker
+fi

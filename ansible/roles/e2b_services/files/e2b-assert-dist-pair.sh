@@ -77,12 +77,28 @@ if [[ -f "${DIR}/SHA256SUMS" ]]; then
   ) >/dev/null
 fi
 
-python3 - "${BUILD_INFO}" "${MIGRATIONS}" "${API_BIN}" <<'PY'
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXTRACTOR="${HERE}/e2b-extract-api-migration-timestamp.sh"
+if [[ ! -f "${EXTRACTOR}" ]]; then
+  echo "timestamp extractor missing: ${EXTRACTOR}" >&2
+  exit 1
+fi
+# shellcheck disable=SC1091
+# shellcheck source=e2b-extract-api-migration-timestamp.sh
+source "${EXTRACTOR}"
+API_TS="$(extract_api_migration_timestamp "${API_BIN}")"
+
+python3 - "${BUILD_INFO}" "${MIGRATIONS}" "${API_BIN}" "${API_TS}" <<'PY'
 import json
 import pathlib
 import sys
 
-build_info_path, migrations_dir, api_bin = (pathlib.Path(p) for p in sys.argv[1:])
+build_info_path, migrations_dir, api_bin, api_ts = (
+    pathlib.Path(sys.argv[1]),
+    pathlib.Path(sys.argv[2]),
+    pathlib.Path(sys.argv[3]),
+    sys.argv[4].strip(),
+)
 data = json.loads(build_info_path.read_text(encoding="utf-8"))
 expected = str(data.get("expected_migration_timestamp") or "").strip()
 if not expected:
@@ -108,6 +124,22 @@ if newest != expected:
         "API/migration pair mismatch: BUILD_INFO expected_migration_timestamp="
         f"{expected} but newest postgres migration prefix is {newest}. "
         "The API binary and migrations must come from the same dist.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+if api_ts != expected:
+    print(
+        "API/migration pair mismatch: bin/api expectedMigrationTimestamp="
+        f"{api_ts} but BUILD_INFO expected_migration_timestamp={expected}. "
+        "The API binary and migrations must come from the same dist.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if api_ts != newest:
+    print(
+        "API/migration pair mismatch: bin/api expectedMigrationTimestamp="
+        f"{api_ts} but newest postgres migration prefix is {newest}.",
         file=sys.stderr,
     )
     raise SystemExit(1)
