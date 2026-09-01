@@ -62,6 +62,16 @@ e2b_admin_email: "admin@example.com"
 # Extra key/value pairs merged into Kodus .env (non-secret overrides).
 kodus_env_overrides: {}
 
+# LLM model id. "auto" lets Kodus pick; Anthropic keys still go in API_OPEN_AI_API_KEY.
+kodus_llm_provider_model: "auto"
+
+# OpenAI-compatible base URL for an on-prem endpoint. Empty leaves upstream unset.
+kodus_openai_force_base_url: ""
+
+# When true, Kodus containers get extra_hosts for api.e2b.<d> and sandbox.e2b.<d>
+# pointing at host-gateway so the worker can hairpin through Traefik.
+kodus_extra_hosts_hairpin: true
+
 # Backup destination: local, s3, or rsync.
 backup_target: "local"
 
