@@ -291,6 +291,14 @@
   tags:
     - e2b_services
 
+- name: Remove force-stop marker on ordinary start so later stops drain
+  ansible.builtin.file:
+    path: "{{ e2b_services_force_stop_marker }}"
+    state: absent
+  when: not (e2b_services_orchestrator_force_stop | bool)
+  tags:
+    - e2b_services
+
 - name: Render api environment file
   ansible.builtin.template:
     src: api.env.j2

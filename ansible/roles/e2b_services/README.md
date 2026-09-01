@@ -47,10 +47,13 @@ policy next to the service definition.
 | `e2b-client-proxy.service` | `e2b` | `After=e2b-orchestrator` |
 
 `FORCE_STOP` is written to `orchestrator.env` from `e2b_services_orchestrator_force_stop`
-(default `false`). The pinned dist also honors
-`/orchestrator/force-stop` when it receives SIGTERM; `upgrade.yml` writes that
-marker and the env value before `systemctl stop`, so Firecracker processes in
-`/sys/fs/cgroup/e2b/sbx-*` are not drained for up to 35 minutes.
+(default `false`). Upstream parses that env once at process start, so rewriting the
+file then `systemctl stop` does not change a running orchestrator. `upgrade.yml`
+also creates the interface marker `/orchestrator/force-stop` (empty, mode `0600`,
+root-owned) **before** `systemctl stop`. Patch `e2b/patches/0001-force-stop-marker.patch`
+treats the marker as `ForceStop=true` at shutdown-signal receipt. The marker is
+removed after a successful stop (and on the subsequent start path) so a later
+ordinary stop still drains. Live FORCE_STOP behaviour is **unverified**.
 
 `upgrade.yml` sets `e2b_services_seed_enabled=false`. The seeder is never invoked
 from that playbook.
@@ -59,9 +62,10 @@ Helpers used by `upgrade.yml` / `uninstall.yml`:
 
 | Path | Purpose |
 |---|---|
-| `/usr/local/lib/qops/e2b-assert-dist-pair.sh` | Fail if `BUILD_INFO.expected_migration_timestamp` ≠ newest postgres migration |
+| `/usr/local/lib/qops/e2b-assert-dist-pair.sh` | Fail unless `bin/api` ldflag, `BUILD_INFO.expected_migration_timestamp`, and newest postgres migration prefix agree |
+| `/usr/local/lib/qops/e2b-extract-api-migration-timestamp.sh` | Shared 14-digit `expectedMigrationTimestamp` extractor (`strings` on `bin/api`; fail closed on zero or multiple matches) |
 | `/usr/local/lib/qops/e2b-compare-upgrade-pins.py` | Template rebuild iff `envd_version` / `firecracker_version` / `kernel_version` changed |
-| `/usr/local/lib/qops/e2b-set-force-stop.sh` | Write `FORCE_STOP=true\|false` in `orchestrator.env` |
+| `/usr/local/lib/qops/e2b-set-force-stop.sh` | Write `FORCE_STOP=true\|false` in `orchestrator.env` and manage `/orchestrator/force-stop` |
 | `/usr/local/lib/qops/e2b-extract-build-info.sh` | Extract `BUILD_INFO` from a dist tarball |
 | `/usr/local/lib/qops/e2b-cleanup-runtime.sh` | Best-effort nftables / netns / veth / cgroup cleanup |
 

@@ -14,7 +14,7 @@ flowchart TB
   end
 
   subgraph Host["Customer host (nftables input: drop; allow 22/80/443)"]
-    Traefik["Traefik :80/:443\n(only 0.0.0.0 bind)"]
+    Traefik["Traefik :80/:443\n(network-reachable)"]
     subgraph Docker_Kodus["Kodus compose (127.0.0.1 ports)"]
       Web[kodus web :3000]
       API[kodus api :3001]
@@ -69,9 +69,9 @@ Wildcard DNS for `*.e2b.<domain>` is required. Template builds intentionally tar
 
 ## Bind policy
 
-**Only Traefik** binds `0.0.0.0` (ports 80 and 443). Every Kodus and E2B datastore port is published on `127.0.0.1` via `docker-compose.override.yml` (`ports: !override`).
+**One policy, two facts:** only Traefik's ports 80 and 443 are reachable from the network. Traefik is the only process we *intend* to publish. E2B Go services (orchestrator, API, client-proxy) **hardcode `0.0.0.0`** by upstream design (not patched; see `ansible/roles/e2b_services` README). They are contained by the host nftables `qops_filter` input chain, which drops everything except loopback, established flows, SSH/HTTP/HTTPS, and orchestrator redirect targets from `veth-*` (TCP 5010–5012, 5016–5018). Kodus and E2B datastore ports are published on `127.0.0.1` via `docker-compose.override.yml` (`ports: !override`).
 
-E2B Go services (orchestrator, API, client-proxy) bind all interfaces by upstream design. The host **nftables** `qops_filter` input chain drops everything except loopback, established flows, SSH/HTTP/HTTPS, and orchestrator redirect targets from `veth-*` (TCP 5010–5012, 5016–5018). Sandbox egress policy is E2B’s default (internet allowed; RFC1918/CGNAT/loopback denied unless `e2b_allow_sandbox_internal_cidrs` is set for private git hosts).
+Sandbox egress policy is E2B’s default (internet allowed; RFC1918/CGNAT/loopback denied unless `e2b_allow_sandbox_internal_cidrs` is set for private git hosts).
 
 ## Request path: webhook → review → sandbox
 

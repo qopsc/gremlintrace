@@ -47,11 +47,16 @@ without producing a usable dump still fails the playbook.
 
 ## GC safety
 
-`qops-e2b-gc` deletes `<store>/<buildID>/` directories that are **not** in live
-`env_builds` / `snapshots` rows **and** older than `e2b_snapshot_retention_hours`
-(default 168). It also prunes Local-registry `templateId:buildId` images.
+`qops-e2b-gc` deletes `<store>/<buildID>/` directories that are **not** live
+`env_build_assignments.build_id` values (assignments whose `env_id` is a live
+template, `envs.deleted_at IS NULL`, or a live snapshot `snapshots.env_id`)
+**and** older than `e2b_snapshot_retention_hours` (default 168).
+`snapshots.id` is a row UUID and is never treated as a storage key. It also
+prunes Local-registry `templateId:buildId` images.
 
 It fail-closes when the database query is unreachable or omits the sentinel
-`__QOPS_E2B_GC_QUERY_OK__` (an empty successful result is not treated as an
-error). `--dry-run` logs candidates and unlinks nothing. Before each delete it
-re-queries so a build created during the run is kept.
+`__QOPS_E2B_GC_QUERY_OK__`, and when `--lock-cmd` cannot take
+`LOCK TABLE env_builds, env_build_assignments, snapshots IN SHARE ROW EXCLUSIVE MODE`
+(INSERT takes ROW EXCLUSIVE and waits). `--dry-run` logs candidates and unlinks
+nothing. Header-chain walking is an unverified M1 limitation (`docs/spike-notes.md`).
+Live GC against Postgres is **unverified**.

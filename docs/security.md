@@ -8,7 +8,7 @@ Kodus’s review **agent executes untrusted repository content** inside sandboxe
 
 1. **Sandbox isolation** — Firecracker microVM per job (not `SANDBOX_PROVIDER=local`).
 2. **Sandbox network policy** — E2B default deny for RFC1918/CGNAT/loopback; optional `e2b_allow_sandbox_internal_cidrs` for private git.
-3. **Host bind policy** — Only Traefik on `0.0.0.0`; datastore and Kodus ports on `127.0.0.1`.
+3. **Host bind policy** — Traefik 80/443 are the network-reachable listeners; E2B Go services hardcode `0.0.0.0` and are contained by nftables input-drop; datastore and Kodus ports on `127.0.0.1`.
 4. **Host nftables** — Input drop except SSH/HTTP/HTTPS and orchestrator redirect ports from `veth-*`.
 5. **Isolation probe** — `qops-doctor` creates a sandbox and asserts `:5008` and LAN targets are blocked while npm egress works.
 
@@ -28,9 +28,7 @@ The orchestrator unit **must not** carry systemd sandboxing directives (`Protect
 
 ## Bind policy
 
-- **Traefik only:** `0.0.0.0:80`, `0.0.0.0:443` (`ansible/roles/traefik`).
-- **Kodus / E2B datastores:** `127.0.0.1` publish via compose override (`ansible/roles/kodus`).
-- **E2B Go binaries:** bind all interfaces; contained by nftables (`ansible/roles/host_firewall` + `e2b_services` README).
+Network-reachable listeners are Traefik `0.0.0.0:80` and `0.0.0.0:443` only (`ansible/roles/traefik`). Kodus and E2B datastore ports are published on `127.0.0.1` via compose override (`ansible/roles/kodus`). E2B Go binaries hardcode `0.0.0.0` (upstream; no bind-address patch) and are contained by nftables (`ansible/roles/host_firewall` + `e2b_services` README). Those two facts are one policy: Traefik is the public edge; nftables input-drop is what keeps the Go `0.0.0.0` sockets off the network.
 
 Preflight fails if ports 80/443 are taken by non-allowed processes before install.
 

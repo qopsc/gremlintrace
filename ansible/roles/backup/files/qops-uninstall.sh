@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Remove software (units, binaries, E2B runtime leftovers). Data is preserved
 # unless --destroy-data is passed. Refuses to run without --confirm.
+#
+# Ordering: stop and verify e2b-orchestrator is inactive, then nftables/netns/
+# veth/cgroup cleanup. Abort (including destroy-data) if that stop fails.
 set -euo pipefail
 
 CONFIRM=0
@@ -37,6 +40,7 @@ E2B_COMPOSE="${QOPS_UNINSTALL_E2B_COMPOSE:-/etc/qops/e2b-data/docker-compose.yml
 E2B_PROJECT="${QOPS_UNINSTALL_E2B_PROJECT:-e2b-data}"
 SECRETS="${QOPS_UNINSTALL_SECRETS:-/etc/qops/secrets.env}"
 LOG="${QOPS_UNINSTALL_LOG:-}"
+ORCH_UNIT="${QOPS_UNINSTALL_ORCHESTRATOR_UNIT:-e2b-orchestrator.service}"
 
 DATA_PATHS=(
   "${QOPS_UNINSTALL_E2B_LIB:-/var/lib/e2b}"
@@ -94,20 +98,62 @@ run() {
   "$@" || log "command failed (continuing): $*"
 }
 
+orchestrator_is_inactive() {
+  local state
+  state="$("${SYSTEMCTL}" is-active "${ORCH_UNIT}" 2>/dev/null || true)"
+  case "${state}" in
+    inactive|failed|unknown|"")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+abort_uninstall() {
+  local msg="$1"
+  log "abort: ${msg}"
+  if [[ "${DESTROY_DATA}" -eq 1 ]]; then
+    log "aborting destroy-data because ${ORCH_UNIT} is not inactive"
+  fi
+  echo "${msg}" >&2
+  exit 1
+}
+
+# Stop units first. Orchestrator must be inactive before runtime cleanup
+# or any destroy-data path.
+log "attempt stop ${ORCH_UNIT} before leftover cleanup"
+if [[ "${DRY_RUN}" -eq 0 ]]; then
+  if ! "${SYSTEMCTL}" stop "${ORCH_UNIT}"; then
+    abort_uninstall "failed to stop ${ORCH_UNIT}"
+  fi
+  if ! orchestrator_is_inactive; then
+    abort_uninstall "${ORCH_UNIT} still active after stop; refusing runtime cleanup and destroy-data"
+  fi
+  log "verified ${ORCH_UNIT} inactive"
+else
+  log "attempt verify ${ORCH_UNIT} inactive (dry-run)"
+fi
+
+for unit in "${UNITS[@]}"; do
+  if [[ "${unit}" == "${ORCH_UNIT}" ]]; then
+    run "${SYSTEMCTL}" disable "${unit}"
+    continue
+  fi
+  run "${SYSTEMCTL}" stop "${unit}"
+  run "${SYSTEMCTL}" disable "${unit}"
+done
+run "${SYSTEMCTL}" daemon-reload
+
 if [[ -x "${CLEANUP}" || -f "${CLEANUP}" ]]; then
-  log "attempt runtime cleanup (nftables, netns, veth, cgroup)"
+  log "attempt runtime cleanup (nftables, netns, veth, cgroup) after ${ORCH_UNIT} inactive"
   if [[ "${DRY_RUN}" -eq 0 ]]; then
     bash "${CLEANUP}" || log "runtime cleanup returned non-zero"
   fi
 else
   log "attempt runtime cleanup skipped (missing ${CLEANUP})"
 fi
-
-for unit in "${UNITS[@]}"; do
-  run "${SYSTEMCTL}" stop "${unit}"
-  run "${SYSTEMCTL}" disable "${unit}"
-done
-run "${SYSTEMCTL}" daemon-reload
 
 if command -v "${DOCKER_BIN}" >/dev/null 2>&1 || [[ -x "${DOCKER_BIN}" ]]; then
   if [[ -f "${KODUS_DIR}/docker-compose.yml" ]]; then

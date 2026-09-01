@@ -11,8 +11,10 @@ make_bundle() {
   local dest="$1"
   mkdir -p "${dest}"
   printf '%s\n' '-- PostgreSQL database dump' 'SET statement_timeout = 0;' \
+    '-- PostgreSQL database dump complete' \
     | gzip -c >"${dest}/kodus-postgres.sql.gz"
   printf '%s\n' '-- PostgreSQL database dump' 'SET statement_timeout = 0;' \
+    '-- PostgreSQL database dump complete' \
     | gzip -c >"${dest}/e2b-postgres.sql.gz"
   printf 'mongo-archive\n' | gzip -c >"${dest}/mongo.archive.gz"
   printf '{ "vhosts": [] }\n' >"${dest}/rabbitmq-definitions.json"
@@ -97,6 +99,75 @@ PY
   run python3 "${VERIFY}" "${bundle}"
   [ "$status" -ne 0 ]
   [[ "$output" == *"gzip"* || "$output" == *"PostgreSQL"* || "$output" == *"not a valid"* ]]
+}
+
+@test "qops-backup-verify rejects a header-only postgres dump" {
+  bundle="${BATS_TMPDIR}/header-only"
+  make_bundle "${bundle}"
+  printf '%s\n' '-- PostgreSQL database dump' 'SET statement_timeout = 0;' \
+    | gzip -c >"${bundle}/kodus-postgres.sql.gz"
+  python3 - "${bundle}" <<'PY'
+import hashlib, pathlib, sys
+dest = pathlib.Path(sys.argv[1])
+names = [
+    "kodus-postgres.sql.gz",
+    "e2b-postgres.sql.gz",
+    "mongo.archive.gz",
+    "rabbitmq-definitions.json",
+    "etc-qops.tar.gz",
+]
+lines = []
+for name in names:
+    digest = hashlib.sha256((dest / name).read_bytes()).hexdigest()
+    lines.append(f"{digest}  {name}")
+(dest / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+  run python3 "${VERIFY}" "${bundle}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"trailer"* || "$output" == *"header-only"* || "$output" == *"complete"* ]]
+}
+
+@test "qops-backup-verify rejects a truncated gzip postgres dump" {
+  bundle="${BATS_TMPDIR}/truncated"
+  make_bundle "${bundle}"
+  # Payload must gzip large enough that a mid-stream cut is still >= 32 bytes
+  # (the size floor) so verify reaches gzip/trailer checks instead of "too small".
+  python3 - "${bundle}/e2b-postgres.sql.gz" <<'PY'
+import gzip
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+body = (
+    b"-- PostgreSQL database dump\nSET statement_timeout = 0;\n"
+    + (b"INSERT INTO t VALUES (1);\n" * 80)
+    + b"-- PostgreSQL database dump complete\n"
+)
+complete = gzip.compress(body)
+assert len(complete) > 64, len(complete)
+cut = complete[: len(complete) * 2 // 3]
+assert len(cut) >= 32, len(cut)
+path.write_bytes(cut)
+PY
+  python3 - "${bundle}" <<'PY'
+import hashlib, pathlib, sys
+dest = pathlib.Path(sys.argv[1])
+names = [
+    "kodus-postgres.sql.gz",
+    "e2b-postgres.sql.gz",
+    "mongo.archive.gz",
+    "rabbitmq-definitions.json",
+    "etc-qops.tar.gz",
+]
+lines = []
+for name in names:
+    digest = hashlib.sha256((dest / name).read_bytes()).hexdigest()
+    lines.append(f"{digest}  {name}")
+(dest / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+  run python3 "${VERIFY}" "${bundle}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gzip"* || "$output" == *"truncated"* || "$output" == *"valid"* || "$output" == *"trailer"* ]]
 }
 
 @test "upgrade.yml calls qops-backup-verify on latest after qops-backup" {

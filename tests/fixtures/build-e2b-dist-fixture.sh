@@ -10,7 +10,12 @@ trap 'rm -rf "${STAGE}"' EXIT
 
 mkdir -p "${STAGE}/bin" "${STAGE}/migrations/postgres" "${STAGE}/migrations/clickhouse"
 for bin in orchestrator api client-proxy envd e2b-seed goose clean-nfs-cache; do
-  printf '#!/bin/sh\necho %s\n' "${bin}" >"${STAGE}/bin/${bin}"
+  if [[ "${bin}" == "api" ]]; then
+    # 14-digit expectedMigrationTimestamp on its own line for strings(1).
+    printf '#!/bin/sh\n%s\necho %s\n' "20240101000000" "${bin}" >"${STAGE}/bin/${bin}"
+  else
+    printf '#!/bin/sh\necho %s\n' "${bin}" >"${STAGE}/bin/${bin}"
+  fi
   chmod 755 "${STAGE}/bin/${bin}"
 done
 printf -- '-- +goose Up\nSELECT 1;\n' >"${STAGE}/migrations/postgres/20240101000000_init.sql"

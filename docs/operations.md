@@ -29,7 +29,7 @@ Check for `max-starting-instances-per-node=3` throttling (compile-time upstream 
 
 **Do:**
 
-1. If orchestrator is wedged, set `FORCE_STOP=true` via `/usr/local/lib/qops/e2b-set-force-stop.sh /etc/qops/e2b/orchestrator.env true`, then `systemctl restart e2b-orchestrator` (drains up to ~35 min without `FORCE_STOP`).
+1. If orchestrator is wedged, set `FORCE_STOP=true` **and** create the interface marker `/orchestrator/force-stop` (empty, mode `0600`, root-owned) via `/usr/local/lib/qops/e2b-set-force-stop.sh /etc/qops/e2b/orchestrator.env true`, then `systemctl restart e2b-orchestrator`. The env var is parsed once at process start; the marker is what a *running* patched orchestrator consults at SIGTERM. Remove the marker after a successful stop so a later ordinary stop still drains. Without force-stop, drain can take up to ~35 min (or SIGKILL at `TimeoutStopSec=180`). Live FORCE_STOP behaviour is **unverified**.
 2. Inspect `/sys/fs/cgroup/e2b/`, `ip link show type veth`, `/run/netns/`.
 3. Run `/usr/local/lib/qops/e2b-cleanup-runtime.sh` (installed by `e2b_services`) if netns/veth remain after stop.
 4. Re-run `doctor.yml`. If templates are corrupt, use `upgrade.yml` with `e2b_templates_force` only after understanding template alias state.
@@ -201,7 +201,9 @@ sudo qops-e2b-gc --dry-run
 sudo qops-e2b-gc
 ```
 
-Deletes `<store>/<buildID>/` dirs not referenced in `env_builds`/`snapshots` and older than `e2b_snapshot_retention_hours` (default 168h). Prunes stale Local-registry `templateId:buildId` images. Fails closed if the DB query is unreachable.
+Deletes `<store>/<buildID>/` dirs not referenced as live `env_build_assignments.build_id` (assignments whose `env_id` is a live template or a live snapshot) and older than `e2b_snapshot_retention_hours` (default 168h). `snapshots.id` is a row UUID and is **not** a storage key. Prunes stale Local-registry `templateId:buildId` images. Holds `LOCK TABLE env_builds, env_build_assignments, snapshots IN SHARE ROW EXCLUSIVE MODE` across query-and-delete so INSERT waits. Fails closed if the DB query or lock is unreachable.
+
+Header-chain walking (parent build IDs in on-disk headers) is an **unverified M1 limitation** — see `docs/spike-notes.md`. Live GC against Postgres is **unverified**.
 
 ---
 

@@ -101,7 +101,7 @@ Bump pins only in `versions.yml`, then on the target:
 ./bootstrap.sh --playbook upgrade --limit <host>
 ```
 
-`upgrade.yml` backs up, verifies the bundle, fetches the new E2B dist, asserts API/migration pair match, sets `FORCE_STOP=true`, migrates, rebuilds templates only when envd/kernel/Firecracker pins change, upgrades Kodus `IMAGE_TAG`, and runs `qops-doctor`. The E2B seeder is never invoked from upgrade.
+`upgrade.yml` backs up, verifies the bundle, fetches the new E2B dist, asserts API/migration pair match (`bin/api` ldflag, BUILD_INFO, newest migration), sets `FORCE_STOP=true` and creates `/orchestrator/force-stop` before `systemctl stop`, migrates, rebuilds templates only when envd/kernel/Firecracker pins change, upgrades Kodus `IMAGE_TAG`, and runs `qops-doctor`. The E2B seeder is never invoked from upgrade. Live FORCE_STOP is **unverified**.
 
 ## What success looks like (unverified on real hosts)
 

@@ -26,20 +26,20 @@ if [[ -f "${ENV_FILE}" ]]; then
   SECRET="$(grep -E '^API_GITHUB_WEBHOOK_SECRET=' "${ENV_FILE}" | head -n1 | cut -d= -f2- || true)"
 fi
 
+if [[ -z "${SECRET}" ]]; then
+  echo "synthetic-github-webhook: webhook secret missing (API_GITHUB_WEBHOOK_SECRET)" >&2
+  exit 1
+fi
+
 PAYLOAD='{"action":"opened","number":1,"pull_request":{"number":1,"head":{"sha":"deadbeef"},"base":{"ref":"main"},"html_url":"https://github.com/example/ci-canary/pull/1"},"repository":{"full_name":"example/ci-canary","name":"ci-canary","owner":{"login":"example"}}}'
 
-SIG=""
-if [[ -n "${SECRET}" ]]; then
-  SIG="$(printf 'sha256=%s' "$(printf '%s' "${PAYLOAD}" | openssl dgst -sha256 -hmac "${SECRET}" | awk '{print $2}')")"
-fi
-
-HEADERS=(-H 'Content-Type: application/json' -H 'X-GitHub-Event: pull_request')
-if [[ -n "${SIG}" ]]; then
-  HEADERS+=(-H "X-Hub-Signature-256: ${SIG}")
-fi
+SIG="$(printf 'sha256=%s' "$(printf '%s' "${PAYLOAD}" | openssl dgst -sha256 -hmac "${SECRET}" | awk '{print $2}')")"
 
 CODE="$(curl -sk -o /tmp/qops-webhook-body.txt -w '%{http_code}' \
-  "${HEADERS[@]}" -X POST -d "${PAYLOAD}" "${WEBHOOK_URL}")"
+  -H 'Content-Type: application/json' \
+  -H 'X-GitHub-Event: pull_request' \
+  -H "X-Hub-Signature-256: ${SIG}" \
+  -X POST -d "${PAYLOAD}" "${WEBHOOK_URL}")"
 
 if [[ ! "${CODE}" =~ ^2 ]]; then
   echo "synthetic webhook returned HTTP ${CODE}" >&2

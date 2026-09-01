@@ -56,7 +56,7 @@ write_env() {
   grep -q 'e2b_services_seed_enabled: false' "${UPGRADE}"
 }
 
-@test "upgrade.yml sets FORCE_STOP before stopping units" {
+@test "upgrade.yml sets FORCE_STOP and marker before stopping units" {
   run python3 - "${UPGRADE}" "${FORCE_STOP_TASKS}" <<'PY'
 import sys, yaml
 upgrade = yaml.safe_load(open(sys.argv[1]))
@@ -68,24 +68,39 @@ assert force_idx < start_idx, (force_idx, start_idx, names)
 force_tasks = yaml.safe_load(open(sys.argv[2]))
 force_names = [t["name"] for t in force_tasks]
 assert force_names[0].startswith("Set orchestrator FORCE_STOP=true")
-assert any("Stop e2b-orchestrator after FORCE_STOP=true" == n for n in force_names)
-stop_idx = force_names.index("Stop e2b-orchestrator after FORCE_STOP=true")
-assert stop_idx > 0
+marker_idx = next(i for i, n in enumerate(force_names) if "force-stop marker" in n and "Create" in n)
+stop_idx = next(i for i, n in enumerate(force_names) if n.startswith("Stop e2b-orchestrator"))
+assert marker_idx < stop_idx, (marker_idx, stop_idx, force_names)
+assert force_names[0]  # env write
+env_idx = 0
+assert env_idx < stop_idx
+clear_idx = next(i for i, n in enumerate(force_names) if n.startswith("Remove force-stop marker"))
+assert stop_idx < clear_idx
 print("ok")
 PY
   [ "$status" -eq 0 ]
 }
 
-@test "e2b-set-force-stop writes true before a stop would read the file" {
+@test "e2b-set-force-stop writes true and creates the marker before a stop would read the file" {
   envf="${BATS_TMPDIR}/orchestrator.env"
+  marker="${BATS_TMPDIR}/force-stop"
+  rm -f "${marker}"
   printf 'ENVIRONMENT=local\nFORCE_STOP=false\n' >"${envf}"
+  export QOPS_FORCE_STOP_MARKER="${marker}"
   run bash "${FORCE}" "${envf}" true
   [ "$status" -eq 0 ]
-  [ "$output" = "changed" ]
+  [[ "$output" == *"changed"* ]]
   grep -qx 'FORCE_STOP=true' "${envf}"
+  [ -f "${marker}" ]
+  [ "$(stat -c '%a' "${marker}")" = "600" ]
+  [ ! -s "${marker}" ]
   run bash "${FORCE}" "${envf}" true
   [ "$status" -eq 0 ]
-  [ "$output" = "unchanged" ]
+  [[ "$output" == *"unchanged"* ]]
+  run bash "${FORCE}" --clear-marker
+  [ "$status" -eq 0 ]
+  [ ! -f "${marker}" ]
+  grep -qx 'FORCE_STOP=true' "${envf}"
 }
 
 @test "pin-change rebuilds templates only for envd, firecracker, or kernel" {
@@ -158,6 +173,57 @@ PY
   run bash "${ASSERT}" --dir "${stage}"
   [ "$status" -ne 0 ]
   [[ "$output" == *"mismatch"* ]]
+}
+
+@test "swapped API binary with matching BUILD_INFO and migrations fails" {
+  archive="${BATS_TMPDIR}/e2b-swap.tar.gz"
+  bash "${FIXTURE}" "${archive}" 6e4ce14
+  stage="${BATS_TMPDIR}/swap-dist"
+  mkdir -p "${stage}"
+  tar -xzf "${archive}" -C "${stage}"
+  printf '#!/bin/sh\n%s\necho api\n' "20990101000000" >"${stage}/bin/api"
+  chmod 755 "${stage}/bin/api"
+  python3 - "${stage}" <<'PY'
+import hashlib
+import pathlib
+import sys
+root = pathlib.Path(sys.argv[1])
+lines = []
+for p in sorted(root.rglob("*")):
+    if p.is_file() and p.name != "SHA256SUMS":
+        rel = p.relative_to(root).as_posix()
+        digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        lines.append(f"{digest}  {rel}")
+(root / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+  run bash "${ASSERT}" --dir "${stage}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"mismatch"* || "$output" == *"expectedMigrationTimestamp"* || "$output" == *"bin/api"* ]]
+}
+
+@test "force-stop marker patch applies to the pinned checkout and stub logic matches" {
+  PATCH="${REPO_ROOT}/e2b/patches/0001-force-stop-marker.patch"
+  [ -f "${PATCH}" ]
+  run python3 -c '
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("logic", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+patch = pathlib.Path(sys.argv[2])
+assert mod.patch_mentions_marker(patch)
+marker = pathlib.Path(sys.argv[3]) / "force-stop"
+assert mod.effective_force_stop(True, marker) is True
+assert mod.effective_force_stop(False, marker) is False
+marker.write_text("")
+assert mod.effective_force_stop(False, marker) is True
+assert mod.effective_force_stop(True, marker) is True
+print("ok")
+' "${REPO_ROOT}/tests/fixtures/force-stop-marker-logic.py" "${PATCH}" "${BATS_TMPDIR}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+  if [[ -d /tmp/e2b-infra/.git ]]; then
+    git -C /tmp/e2b-infra apply --check "${PATCH}"
+  fi
 }
 
 @test "upgrade.yml rejects kodus_image_tag=latest" {

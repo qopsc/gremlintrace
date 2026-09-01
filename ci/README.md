@@ -179,13 +179,13 @@ summary line via `ci/matrix/step-summary.sh`.
 | Step | What it exercises |
 |---|---|
 | `stage-artifacts.sh` | Build E2B dist (`e2b/build/build.sh`) + mirror FC artifacts locally |
-| `prepare-host.sh` | TLS (provided), `/etc/hosts`, KVM/nbd modules, probe target IPs |
+| `prepare-host.sh` | TLS (provided), wildcard DNS (`wildcard-dns.py` for `*.e2b.<domain>` / `*.<domain>`), `10.255.0.1` on lo, dummy `:80` until Traefik, KVM/nbd modules |
 | `run-bootstrap.sh --playbook site` | Full M1 install on localhost |
 | `run-bootstrap.sh --playbook doctor` | `qops-doctor` including E2B smoke + isolation probe |
 | `kodus-smoke.sh` | Loopback health + `synthetic-github-webhook.sh` |
 | `check-idempotency.sh` | Second `site.yml` with `changed=0`, no template build |
 | `check-dist-pair-mismatch.sh` | `e2b-assert-dist-pair.sh` rejects tampered `BUILD_INFO` |
-| `check-orchestrator-restart.sh` | `systemctl restart e2b-orchestrator` + leak scan |
+| `check-orchestrator-restart.sh` | Create sandboxes, assert live ns/veth/nbd/cgroup, restart, assert cleanup (fail if create fails) |
 | `check-upgrade.sh` | `upgrade.yml` at the **same** pin (backup, verify, migrate) |
 | `check-reboot-skip.sh` | Documents reboot gate as **not runnable** on GH runners |
 
