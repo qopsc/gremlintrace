@@ -88,8 +88,15 @@ qops_lan_ipv4: ""
 # ssh edge.example.net 'curl -fsS -o /dev/null -w %{http_code} https://kodus-webhooks.example.com/health'
 doctor_webhook_external_probe_cmd: ""
 
-# Backup destination: local, s3, or rsync.
+# Backup destination: local, s3, or rsync. M1 implements local only.
 backup_target: "local"
+
+# Keep this many days of local backup bundles (qops-backup retention).
+backup_retention_days: 7
+
+# Uninstall requires an extra-var override. Default preserves customer data.
+qops_uninstall_confirm: false
+qops_uninstall_destroy_data: false
 
 # Disable Kodus product telemetry when true.
 kodus_telemetry_disabled: false

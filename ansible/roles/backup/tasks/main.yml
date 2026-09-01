@@ -1,6 +1,156 @@
 ---
-- name: Placeholder for the backup role
-  ansible.builtin.debug:
-    msg: "backup role is implemented in task M2"
+- name: Ensure qops lib and backup directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ '0750' if item == backup_root else '0755' }}"
+  loop:
+    - /usr/local/lib/qops
+    - "{{ backup_root }}"
+    - "{{ backup_qops_dir }}"
+  tags:
+    - backup
+
+- name: Install backup and GC helper scripts in lib
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ backup_lib_dir }}/{{ item.dest }}"
+    mode: "0755"
+    owner: root
+    group: root
+  loop:
+    - src: qops-e2b-gc
+      dest: qops-e2b-gc
+    - src: e2b-gc-query.sh
+      dest: e2b-gc-query.sh
+    - src: qops-backup-verify
+      dest: qops-backup-verify
+  tags:
+    - backup
+
+- name: Install qops-backup
+  ansible.builtin.copy:
+    src: qops-backup
+    dest: "{{ backup_script_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - backup
+
+- name: Install qops-backup-verify
+  ansible.builtin.copy:
+    src: qops-backup-verify
+    dest: "{{ backup_verify_script_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - backup
+
+- name: Install qops-e2b-gc wrapper
+  ansible.builtin.copy:
+    src: qops-e2b-gc-wrapper
+    dest: "{{ backup_e2b_gc_script_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - backup
+
+- name: Install qops-uninstall
+  ansible.builtin.copy:
+    src: qops-uninstall.sh
+    dest: "{{ backup_uninstall_script_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - backup
+
+- name: Render backup environment file
+  ansible.builtin.template:
+    src: backup.env.j2
+    dest: "{{ backup_env_file }}"
+    owner: root
+    group: root
+    mode: "0640"
+  tags:
+    - backup
+
+- name: Render E2B GC environment file
+  ansible.builtin.template:
+    src: e2b-gc.env.j2
+    dest: "{{ backup_gc_env_file }}"
+    owner: root
+    group: root
+    mode: "0640"
+  tags:
+    - backup
+
+- name: Install qops-backup systemd unit
+  ansible.builtin.template:
+    src: qops-backup.service.j2
+    dest: "/etc/systemd/system/{{ backup_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  tags:
+    - backup
+
+- name: Install qops-backup timer
+  ansible.builtin.template:
+    src: qops-backup.timer.j2
+    dest: "/etc/systemd/system/{{ backup_timer_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  tags:
+    - backup
+
+- name: Install qops-e2b-gc systemd unit
+  ansible.builtin.template:
+    src: qops-e2b-gc.service.j2
+    dest: "/etc/systemd/system/{{ backup_gc_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  tags:
+    - backup
+
+- name: Install qops-e2b-gc timer
+  ansible.builtin.template:
+    src: qops-e2b-gc.timer.j2
+    dest: "/etc/systemd/system/{{ backup_gc_timer_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  tags:
+    - backup
+
+- name: Flush backup handlers before enabling timers
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - backup
+
+- name: Enable qops-backup timer
+  ansible.builtin.systemd:
+    name: "{{ backup_timer_unit }}"
+    enabled: true
+    state: started
+  tags:
+    - backup
+
+- name: Enable qops-e2b-gc timer
+  ansible.builtin.systemd:
+    name: "{{ backup_gc_timer_unit }}"
+    enabled: true
+    state: started
   tags:
     - backup

@@ -4,6 +4,8 @@ e2b_services_current_dir: "{{ e2b_services_install_prefix }}/current"
 e2b_services_version_dir: "{{ e2b_services_install_prefix }}/{{ e2b_dist_version }}"
 e2b_services_config_dir: /etc/qops/e2b
 e2b_services_orchestrator_force_stop: false
+# site.yml seeds; upgrade.yml must set this false so the destructive seeder never runs.
+e2b_services_seed_enabled: true
 
 e2b_services_user: e2b
 e2b_services_group: e2b
@@ -73,6 +75,8 @@ e2b_services_dist_local_path: ""
 e2b_services_dist_download_url: ""
 e2b_services_dist_checksum_path: ""
 e2b_services_dist_checksum_url: ""
+e2b_services_dist_archive_path: ""
+e2b_services_dist_effective_url: ""
 e2b_services_dist_cache_dir: /var/cache/qops
 e2b_services_release_base_url_effective: >-
   {{ qops_release_base_url if (qops_release_base_url | default('') | length > 0)

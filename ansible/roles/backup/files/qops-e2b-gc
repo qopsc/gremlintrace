@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""Prune unreferenced paused-snapshot dirs and stale Local-registry template images.
+
+Safety properties (each has a GUARD block tests can disable):
+  fail_closed     — a database/query error deletes nothing and exits non-zero
+  keep_referenced — a build id present in env_builds/snapshots is never removed
+  retention       — unreferenced dirs newer than the retention window are kept
+  dry_run         — --dry-run logs candidates and unlinks nothing
+  race_requery    — ids created between the first query and delete are re-checked
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+SENTINEL = "__QOPS_E2B_GC_QUERY_OK__"
+
+
+def log(msg: str) -> None:
+    sys.stderr.write(msg + "\n")
+    sys.stderr.flush()
+
+
+def dir_size_bytes(path: Path) -> int:
+    total = 0
+    if not path.exists():
+        return 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    for root, dirs, files in os.walk(path, followlinks=False):
+        for name in files:
+            try:
+                total += (Path(root) / name).stat().st_size
+            except OSError:
+                continue
+        for name in dirs:
+            try:
+                total += (Path(root) / name).stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def run_query(query_cmd: list[str]) -> set[str]:
+    try:
+        proc = subprocess.run(
+            query_cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        proc = subprocess.CompletedProcess(query_cmd, 1, "", str(exc))
+    lines = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+    # BEGIN_GUARD fail_closed
+    if proc.returncode != 0 or SENTINEL not in lines:
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
+        log(
+            "qops-e2b-gc: database query failed; refusing to delete anything "
+            f"(exit {proc.returncode}, sentinel_present={SENTINEL in lines})"
+        )
+        raise SystemExit(proc.returncode or 1)
+    # END_GUARD fail_closed
+    return {line for line in lines if line != SENTINEL}
+
+
+def prune_docker_images(
+    referenced: set[str],
+    deleted_ids: set[str],
+    docker_bin: str,
+    summary_path: Path | None,
+    dry_run: bool,
+) -> list[str]:
+    if not docker_bin or shutil.which(docker_bin) is None:
+        log("qops-e2b-gc: docker not available; skipping image prune")
+        return []
+    listed = subprocess.run(
+        [docker_bin, "images", "--format", "{{.Repository}}:{{.Tag}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        log("qops-e2b-gc: docker images listing failed; skipping image prune")
+        return []
+
+    template_ids: set[str] = set()
+    keep_images: set[str] = set()
+    if summary_path is not None and summary_path.is_file():
+        try:
+            data = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        for row in data.get("templates", []):
+            template_id = row.get("templateId")
+            build_id = row.get("buildId")
+            if template_id:
+                template_ids.add(str(template_id))
+            if template_id and build_id:
+                keep_images.add(f"{template_id}:{build_id}")
+
+    removed: list[str] = []
+    for image in listed.stdout.splitlines():
+        image = image.strip()
+        if not image or image.endswith(":latest"):
+            continue
+        repo, _, tag = image.rpartition(":")
+        if not tag or tag == "<none>":
+            continue
+        if tag in referenced or image in keep_images:
+            continue
+        stale_summary = bool(template_ids) and repo in template_ids
+        stale_deleted = tag in deleted_ids
+        if not stale_summary and not stale_deleted:
+            continue
+        if dry_run:
+            log(f"qops-e2b-gc: dry-run would docker rmi {image}")
+            continue
+        rm = subprocess.run(
+            [docker_bin, "rmi", "-f", image],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if rm.returncode != 0:
+            sys.stderr.write(rm.stderr or f"docker rmi failed for {image}\n")
+            raise SystemExit(rm.returncode or 1)
+        removed.append(image)
+        log(f"qops-e2b-gc: removed docker image {image}")
+    return removed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="qops-e2b-gc")
+    parser.add_argument(
+        "--store",
+        default=os.environ.get("QOPS_E2B_GC_STORE", "/var/lib/e2b/storage"),
+    )
+    parser.add_argument(
+        "--retention-hours",
+        type=int,
+        default=int(os.environ.get("QOPS_E2B_GC_RETENTION_HOURS", "168")),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=os.environ.get("QOPS_E2B_GC_DRY_RUN") == "1",
+    )
+    parser.add_argument(
+        "--query-cmd",
+        default=os.environ.get("QOPS_E2B_GC_QUERY_CMD", ""),
+        help="command whose stdout is referenced build ids plus the sentinel line",
+    )
+    parser.add_argument(
+        "--docker-bin",
+        default=os.environ.get("QOPS_E2B_GC_DOCKER", "docker"),
+    )
+    parser.add_argument(
+        "--summary-path",
+        default=os.environ.get(
+            "QOPS_E2B_GC_SUMMARY",
+            "/var/lib/e2b/templates-last-summary.json",
+        ),
+    )
+    parser.add_argument("--now-epoch", type=float, default=None)
+    args = parser.parse_args()
+
+    if args.retention_hours < 0:
+        log("qops-e2b-gc: retention-hours must be >= 0")
+        return 1
+    if not args.query_cmd:
+        log(
+            "qops-e2b-gc: --query-cmd is required "
+            "(fail closed without a database query)"
+        )
+        return 1
+
+    store = Path(args.store)
+    if not store.is_dir():
+        log(f"qops-e2b-gc: store missing: {store}")
+        return 1
+
+    query_cmd = ["/bin/bash", "-lc", args.query_cmd]
+    referenced = run_query(query_cmd)
+    log(f"qops-e2b-gc: referenced build ids: {len(referenced)}")
+
+    now = args.now_epoch if args.now_epoch is not None else time.time()
+    cutoff = now - (args.retention_hours * 3600)
+
+    candidates: list[Path] = []
+    kept_referenced = 0
+    kept_fresh = 0
+    for entry in sorted(store.iterdir(), key=lambda p: p.name):
+        if not entry.is_dir():
+            continue
+        build_id = entry.name
+        # BEGIN_GUARD keep_referenced
+        if build_id in referenced:
+            kept_referenced += 1
+            log(f"qops-e2b-gc: keeping referenced {build_id}")
+            continue
+        # END_GUARD keep_referenced
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError as exc:
+            log(f"qops-e2b-gc: stat failed for {entry}: {exc}; skipping")
+            continue
+        # BEGIN_GUARD retention
+        if mtime >= cutoff:
+            kept_fresh += 1
+            log(
+                f"qops-e2b-gc: keeping unreferenced {build_id} "
+                f"(newer than retention window of {args.retention_hours}h)"
+            )
+            continue
+        # END_GUARD retention
+        candidates.append(entry)
+
+    removed_dirs: list[dict] = []
+    reclaimed = 0
+    skipped_race = 0
+
+    for entry in candidates:
+        # BEGIN_GUARD race_requery
+        live = run_query(query_cmd)
+        if entry.name in live:
+            skipped_race += 1
+            log(
+                f"qops-e2b-gc: race: {entry.name} became referenced after the "
+                "first query; not deleting"
+            )
+            continue
+        # END_GUARD race_requery
+        size = dir_size_bytes(entry)
+        # BEGIN_GUARD dry_run
+        if args.dry_run:
+            log(f"qops-e2b-gc: dry-run would remove {entry} ({size} bytes)")
+            continue
+        # END_GUARD dry_run
+        try:
+            shutil.rmtree(entry)
+        except OSError as exc:
+            log(f"qops-e2b-gc: failed to remove {entry}: {exc}")
+            return 1
+        reclaimed += size
+        removed_dirs.append({"id": entry.name, "bytes": size})
+        log(f"qops-e2b-gc: removed {entry} ({size} bytes)")
+
+    deleted_ids = {row["id"] for row in removed_dirs}
+    image_names = prune_docker_images(
+        referenced,
+        deleted_ids,
+        args.docker_bin,
+        Path(args.summary_path) if args.summary_path else None,
+        args.dry_run,
+    )
+
+    summary = {
+        "dry_run": bool(args.dry_run),
+        "referenced": len(referenced),
+        "kept_referenced": kept_referenced,
+        "kept_fresh": kept_fresh,
+        "removed": removed_dirs,
+        "reclaimed_bytes": reclaimed,
+        "skipped_race": skipped_race,
+        "images_removed": image_names,
+        "store": str(store),
+        "retention_hours": args.retention_hours,
+    }
+    print(json.dumps(summary, sort_keys=True))
+    log(
+        f"qops-e2b-gc: reclaimed {reclaimed} bytes from {len(removed_dirs)} "
+        f"directories; images_removed={len(image_names)}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

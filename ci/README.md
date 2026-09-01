@@ -15,7 +15,7 @@ upload are untested here.
 | Bump E2B pin | `.github/workflows/pin-bump.yml` | Task 3 |
 | Lint | `.github/workflows/lint.yml` | Task 3 |
 | Installer matrix | `.github/workflows/installer-matrix.yml` | Task 12 |
-| Restore drill | `.github/workflows/restore-drill.yml` | M2 |
+| Restore drill | _(M2 — not yet in repo)_ | M2 |
 
 ## `build-e2b.yml`
 
@@ -151,6 +151,71 @@ Faithful CI reproduction of local developer checks:
 |---|---|---|
 | `check` | `contents: read` | none |
 
+## `installer-matrix.yml`
+
+### Triggers
+
+- `workflow_dispatch`
+- `push` to `main` and `pull_request` when `versions.yml`, `ansible/**`, `bootstrap.sh`,
+  `ci/matrix/**`, `e2b/**`, or this workflow changes.
+
+### Gate (secrets and fork safety)
+
+Job `gate` runs `ci/matrix/gate-secrets.sh`:
+
+- **Skips** (success with summary, no install) when `QOPS_CI_LLM_API_KEY` or
+  `QOPS_CI_CANARY_REPO_TOKEN` is missing.
+- **Skips** fork pull requests (`GITHUB_HEAD_REPOSITORY != GITHUB_REPOSITORY`) so untrusted
+  PR code never receives secrets. Does **not** use `pull_request_target`.
+
+Optional repository variable: `QOPS_CI_CANARY_REPO` (`owner/name`) — used only to verify the
+canary token can read the repo after the synthetic webhook POST.
+
+### Ubuntu 24.04 leg (`ubuntu-2404` job)
+
+Runs on `ubuntu-24.04` (KVM available). Each verification is a separate step with its own
+summary line via `ci/matrix/step-summary.sh`.
+
+| Step | What it exercises |
+|---|---|
+| `stage-artifacts.sh` | Build E2B dist (`e2b/build/build.sh`) + mirror FC artifacts locally |
+| `prepare-host.sh` | TLS (provided), `/etc/hosts`, KVM/nbd modules, probe target IPs |
+| `run-bootstrap.sh --playbook site` | Full M1 install on localhost |
+| `run-bootstrap.sh --playbook doctor` | `qops-doctor` including E2B smoke + isolation probe |
+| `kodus-smoke.sh` | Loopback health + `synthetic-github-webhook.sh` |
+| `check-idempotency.sh` | Second `site.yml` with `changed=0`, no template build |
+| `check-dist-pair-mismatch.sh` | `e2b-assert-dist-pair.sh` rejects tampered `BUILD_INFO` |
+| `check-orchestrator-restart.sh` | `systemctl restart e2b-orchestrator` + leak scan |
+| `check-upgrade.sh` | `upgrade.yml` at the **same** pin (backup, verify, migrate) |
+| `check-reboot-skip.sh` | Documents reboot gate as **not runnable** on GH runners |
+
+CI inventory: `ci/matrix/inventory-localhost.yml` + `ci/matrix/group_vars/codereviewer.yml`
+(relaxed preflight thresholds — **not** for production).
+
+### Synthetic webhook (`ci/matrix/synthetic-github-webhook.sh`)
+
+**Proves:** Traefik routes `kodus-webhooks.<domain>`, TLS terminates, handler accepts a
+signed GitHub `pull_request` payload (HTTP 2xx).
+
+**Does not prove:** GitHub inbound delivery, Cloudflare Tunnel, canary PR review, graph-stage
+comments, or 700 s streamed `commands.run`.
+
+### Permissions and secrets
+
+| Job | `permissions` | Secrets |
+|---|---|---|
+| `gate`, `skip-report` | `contents: read` | none |
+| `ubuntu-2404` | `contents: read` | `QOPS_CI_LLM_API_KEY`, `QOPS_CI_CANARY_REPO_TOKEN` |
+
+### Not covered on GitHub-hosted runners
+
+- Reboot → `doctor.yml` persistence (no reboot API)
+- Upgrade from a **previous** `versions.yml` dist (needs two published releases)
+- 10 parallel reviews / `max-starting-instances-per-node` throttling
+- 700 s public `commands.run` / WebSocket soak
+- Full canary PR review with cross-file AST context
+- Ubuntu 26.04 / Fedora 44 legs (M2 self-hosted runners)
+
 ## How to bump a pin manually
 
 1. Edit `versions.yml` (and keep `e2b/e2b.pin` in sync — bats enforces equality).
@@ -189,3 +254,5 @@ make check
 - `pin-bump.yml` cloning upstream and opening a PR
 - `lint.yml` on GitHub-hosted runners (Node/ansible toolchain differences)
 - Scheduled cron execution
+- `installer-matrix.yml` full install on a GitHub runner (first run pending secrets + KVM job)
+- Synthetic webhook → real Kodus review pipeline end-to-end

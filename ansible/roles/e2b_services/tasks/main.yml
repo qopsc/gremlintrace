@@ -8,26 +8,8 @@
   tags:
     - e2b_services
 
-- name: Install e2b_services helper scripts
-  ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: "/usr/local/lib/qops/{{ item }}"
-    mode: "0755"
-    owner: root
-    group: root
-  loop:
-    - install-e2b-dist.sh
-    - verify-e2b-dist.sh
-    - e2b-read-secret.sh
-    - e2b-set-secret.sh
-    - e2b-psql.sh
-    - e2b-ensure-pg-extensions.sh
-    - e2b-goose-migrate.sh
-    - e2b-seed-if-needed.sh
-    - e2b-apply-limits.sh
-    - e2b-wait-health.sh
-    - e2b-ensure-node-id.sh
-    - e2b-set-force-stop.sh
+- name: Fetch E2B dist archive and install service helpers
+  ansible.builtin.import_tasks: fetch-dist.yml
   tags:
     - e2b_services
 
@@ -173,19 +155,6 @@
   tags:
     - e2b_services
 
-- name: Verify E2B dist archive checksum
-  ansible.builtin.command:
-    argv:
-      - sha256sum
-      - --check
-      - "{{ e2b_services_dist_effective_checksum_path | basename }}"
-    chdir: "{{ e2b_services_dist_effective_checksum_path | dirname }}"
-  register: e2b_services_dist_archive_checksum
-  changed_when: false
-  when: e2b_services_dist_checksum_stat.stat.exists
-  tags:
-    - e2b_services
-
 - name: Verify installed E2B dist
   ansible.builtin.command:
     cmd: >-
@@ -223,6 +192,13 @@
       {{ e2b_services_current_dir }}
       {{ e2b_services_envd_dest }}
       {{ e2b_dist_version }}
+  changed_when: false
+  tags:
+    - e2b_services
+
+- name: Fail fast when API binary and migrations are not the same dist
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-assert-dist-pair.sh --dir {{ e2b_services_version_dir }}
   changed_when: false
   tags:
     - e2b_services
@@ -416,6 +392,7 @@
   register: e2b_services_seed
   changed_when: (e2b_services_seed.stdout | trim) == "seeded"
   no_log: true
+  when: e2b_services_seed_enabled | bool
   tags:
     - e2b_services
 

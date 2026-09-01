@@ -25,7 +25,7 @@ for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
     merged.update(yaml.safe_load(path.read_text()) or {})
 for role in (
     "preflight", "common", "host_firewall", "docker", "e2b_host",
-    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
+    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "backup", "doctor",
 ):
     defaults = root / f"ansible/roles/{role}/defaults/main.yml"
     if defaults.is_file():
@@ -162,7 +162,7 @@ def merge(extra=None):
         merged.update(yaml.safe_load(path.read_text()) or {})
     for role in (
         "preflight", "common", "host_firewall", "docker", "e2b_host",
-        "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
+        "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "backup", "doctor",
     ):
         defaults = root / f"ansible/roles/{role}/defaults/main.yml"
         if defaults.is_file():
@@ -496,7 +496,7 @@ for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
     merged.update(yaml.safe_load(path.read_text()) or {})
 for role in (
     "preflight", "common", "host_firewall", "docker", "e2b_host",
-    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
+    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "backup", "doctor",
 ):
     defaults = root / f"ansible/roles/{role}/defaults/main.yml"
     if defaults.is_file():

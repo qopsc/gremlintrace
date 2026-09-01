@@ -1,0 +1,96 @@
+---
+- name: Ensure qops lib directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_services
+
+- name: Install e2b_services helper scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/lib/qops/{{ item }}"
+    mode: "0755"
+    owner: root
+    group: root
+  loop:
+    - install-e2b-dist.sh
+    - verify-e2b-dist.sh
+    - e2b-read-secret.sh
+    - e2b-set-secret.sh
+    - e2b-psql.sh
+    - e2b-ensure-pg-extensions.sh
+    - e2b-goose-migrate.sh
+    - e2b-seed-if-needed.sh
+    - e2b-apply-limits.sh
+    - e2b-wait-health.sh
+    - e2b-ensure-node-id.sh
+    - e2b-assert-dist-pair.sh
+    - e2b-compare-upgrade-pins.py
+    - e2b-set-force-stop.sh
+    - e2b-extract-build-info.sh
+    - e2b-cleanup-runtime.sh
+  tags:
+    - e2b_services
+
+- name: Ensure E2B dist cache directory exists
+  ansible.builtin.file:
+    path: "{{ e2b_services_dist_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_services
+
+- name: Resolve E2B dist archive path
+  ansible.builtin.set_fact:
+    e2b_services_dist_archive_path: >-
+      {{ e2b_services_dist_local_path if (e2b_services_dist_local_path | length > 0)
+         else (e2b_services_dist_cache_dir ~ '/e2b-' ~ e2b_dist_version ~ '.tar.gz') }}
+  tags:
+    - e2b_services
+
+- name: Resolve E2B dist download URL
+  ansible.builtin.set_fact:
+    e2b_services_dist_effective_url: >-
+      {{ e2b_services_dist_download_url if (e2b_services_dist_download_url | length > 0)
+         else (e2b_services_release_base_url_effective ~ '/e2b-' ~ e2b_dist_version ~ '.tar.gz'
+               if (e2b_services_release_base_url_effective | length > 0
+                   and e2b_services_dist_local_path | length == 0)
+               else '') }}
+  tags:
+    - e2b_services
+
+- name: Download E2B dist archive
+  ansible.builtin.get_url:
+    url: "{{ e2b_services_dist_effective_url }}"
+    dest: "{{ e2b_services_dist_archive_path }}"
+    mode: "0644"
+    force: false
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - e2b_services_dist_effective_url | length > 0
+  tags:
+    - e2b_services
+
+- name: Assert E2B dist archive is available
+  ansible.builtin.stat:
+    path: "{{ e2b_services_dist_archive_path }}"
+  register: e2b_services_dist_archive_stat
+  tags:
+    - e2b_services
+
+- name: Fail when E2B dist archive is missing
+  ansible.builtin.fail:
+    msg: >-
+      E2B dist archive not found at {{ e2b_services_dist_archive_path }}.
+      Provide it via e2b_services_dist_local_path, e2b_services_dist_download_url,
+      qops_release_base_url, or qops_github_repository
+      (https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/e2b-<e2b_dist_version>.tar.gz).
+  when: not e2b_services_dist_archive_stat.stat.exists
+  tags:
+    - e2b_services

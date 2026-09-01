@@ -52,6 +52,19 @@ policy next to the service definition.
 marker and the env value before `systemctl stop`, so Firecracker processes in
 `/sys/fs/cgroup/e2b/sbx-*` are not drained for up to 35 minutes.
 
+`upgrade.yml` sets `e2b_services_seed_enabled=false`. The seeder is never invoked
+from that playbook.
+
+Helpers used by `upgrade.yml` / `uninstall.yml`:
+
+| Path | Purpose |
+|---|---|
+| `/usr/local/lib/qops/e2b-assert-dist-pair.sh` | Fail if `BUILD_INFO.expected_migration_timestamp` ≠ newest postgres migration |
+| `/usr/local/lib/qops/e2b-compare-upgrade-pins.py` | Template rebuild iff `envd_version` / `firecracker_version` / `kernel_version` changed |
+| `/usr/local/lib/qops/e2b-set-force-stop.sh` | Write `FORCE_STOP=true\|false` in `orchestrator.env` |
+| `/usr/local/lib/qops/e2b-extract-build-info.sh` | Extract `BUILD_INFO` from a dist tarball |
+| `/usr/local/lib/qops/e2b-cleanup-runtime.sh` | Best-effort nftables / netns / veth / cgroup cleanup |
+
 ## Seed and limits
 
 `bin/e2b-seed` runs only when `SELECT 1 FROM teams WHERE email=$1` is **empty**.

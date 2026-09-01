@@ -1,0 +1,10 @@
+[Unit]
+Description=Run qops-backup on a calendar schedule
+
+[Timer]
+OnCalendar={{ backup_timer_on_calendar }}
+Persistent=true
+Unit={{ backup_unit }}
+
+[Install]
+WantedBy=timers.target
