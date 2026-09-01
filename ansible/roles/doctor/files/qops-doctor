@@ -16,7 +16,7 @@ TEMPLATE_STORE="${DOCTOR_TEMPLATE_STORE:-/var/lib/e2b/storage}"
 DISK_PATHS="${DOCTOR_DISK_PATHS:-/var/lib/e2b /orchestrator}"
 SMOKE_CMD="${DOCTOR_E2B_SMOKE_CMD:-/usr/local/lib/qops/e2b-smoke.sh}"
 WORKER_LOGS_CMD="${DOCTOR_WORKER_LOGS_CMD:-}"
-WEBHOOK_URL="${DOCTOR_WEBHOOK_URL:-}"
+WEBHOOK_EXTERNAL_CMD="${DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD:-}"
 KODUS_WEB_HEALTH="${DOCTOR_KODUS_WEB_HEALTH:-http://127.0.0.1:3000/health}"
 KODUS_API_HEALTH="${DOCTOR_KODUS_API_HEALTH:-http://127.0.0.1:3001/health}"
 KODUS_WEBHOOKS_HEALTH="${DOCTOR_KODUS_WEBHOOKS_HEALTH:-http://127.0.0.1:3332/health}"
@@ -35,25 +35,31 @@ printf '[]' >"${FAILURES_STATE}"
 add_check() {
   local id="$1" name="$2" passed="$3" message="$4"
   local details="${5:-{}}"
-  python3 - "${CHECKS_STATE}" "${FAILURES_STATE}" "${id}" "${name}" "${passed}" "${message}" "${details}" <<'PY'
+  local skipped="${6:-false}"
+  python3 - "${CHECKS_STATE}" "${FAILURES_STATE}" "${id}" "${name}" "${passed}" "${message}" "${details}" "${skipped}" <<'PY'
 import json
 import sys
 
-checks_path, failures_path, check_id, name, passed, message, details_raw = sys.argv[1:8]
+checks_path, failures_path, check_id, name, passed, message, details_raw, skipped = sys.argv[1:9]
 checks = json.load(open(checks_path, encoding="utf-8"))
 try:
     details = json.loads(details_raw)
 except json.JSONDecodeError:
     details = {"raw": details_raw}
-checks.append({
+item = {
     "id": check_id,
     "name": name,
     "passed": passed == "true",
     "message": message,
     "details": details,
-})
+}
+if skipped == "true":
+    item["skipped"] = True
+    item["unverified"] = True
+    item["passed"] = False
+checks.append(item)
 json.dump(checks, open(checks_path, "w", encoding="utf-8"))
-if passed != "true":
+if passed != "true" and skipped != "true":
     failures = json.load(open(failures_path, encoding="utf-8"))
     failures.append(message)
     json.dump(failures, open(failures_path, "w", encoding="utf-8"))
@@ -98,13 +104,35 @@ import json
 import sys
 
 report_path, checks_path, failures_path, rc = sys.argv[1:5]
-report = json.load(open(report_path, encoding="utf-8"))
-passed = bool(report.get("passed")) and rc == "0"
-failures = report.get("failures") or []
-msg = "Preflight checks passed." if passed else (
-    "Preflight re-check failed: " + " ".join(failures)
-)
-details = {"preflight_passed": report.get("passed"), "failures": failures, "exit": int(rc)}
+msg = ""
+passed = False
+details = {"exit": int(rc)}
+try:
+    raw = open(report_path, encoding="utf-8").read()
+    report = json.loads(raw)
+except (OSError, json.JSONDecodeError) as exc:
+    msg = f"Preflight report is malformed or truncated ({exc})."
+    details["error"] = str(exc)
+    report = None
+if report is not None:
+    required = ("version", "timestamp", "passed", "checks", "failures")
+    missing = [key for key in required if key not in report]
+    if missing:
+        msg = "Preflight report has the wrong schema; missing: " + ", ".join(missing)
+        details["missing"] = missing
+    elif not isinstance(report.get("checks"), list) or not isinstance(report.get("failures"), list):
+        msg = "Preflight report has the wrong schema; checks and failures must be lists."
+        details["schema"] = "checks/failures"
+    elif report.get("version") != 1 and report.get("version") != "1":
+        msg = f"Preflight report schema version {report.get('version')!r} is unsupported."
+        details["version"] = report.get("version")
+    else:
+        passed = bool(report.get("passed")) and rc == "0"
+        failures = report.get("failures") or []
+        msg = "Preflight checks passed." if passed else (
+            "Preflight re-check failed: " + " ".join(str(f) for f in failures)
+        )
+        details = {"preflight_passed": report.get("passed"), "failures": failures, "exit": int(rc)}
 checks = json.load(open(checks_path, encoding="utf-8"))
 checks.append({
     "id": "preflight",
@@ -185,58 +213,83 @@ check_nbd_in_use() {
     "${in_use} nbd device(s) currently in use." "{\"in_use\":${in_use}}"
 }
 
-newest_kernel_dir() {
-  local root="$1"
-  if [[ ! -d "${root}" ]]; then
-    return 1
-  fi
-  python3 - "${root}" <<'PY'
-import pathlib
-import sys
-from functools import cmp_to_key
-
-root = pathlib.Path(sys.argv[1])
-names = [p.name for p in root.iterdir() if p.is_dir()]
-if not names:
-    raise SystemExit(1)
-
-def parts(v):
-    out = []
-    for chunk in v.replace("-", ".").split("."):
-        digits = "".join(c for c in chunk if c.isdigit())
-        out.append(int(digits) if digits else 0)
-    return out
-
-def cmp(a, b):
-    ap, bp = parts(a), parts(b)
-    n = max(len(ap), len(bp))
-    ap += [0] * (n - len(ap))
-    bp += [0] * (n - len(bp))
-    return (ap > bp) - (ap < bp)
-
-names.sort(key=cmp_to_key(cmp))
-print(names[-1])
-PY
-}
-
 check_nbd_ko_newest() {
-  local newest ko
-  newest="$(newest_kernel_dir "${MODULES_DIR}" || true)"
-  if [[ -z "${newest}" ]]; then
-    add_check "nbd_ko_newest_kernel" "nbd.ko for newest installed kernel" false \
-      "No installed kernels under ${MODULES_DIR}." "{}"
-    return
-  fi
-  ko="$(find "${MODULES_DIR}/${newest}" \( -name 'nbd.ko' -o -name 'nbd.ko.*' \) 2>/dev/null | head -n1 || true)"
-  if [[ -n "${ko}" ]]; then
-    add_check "nbd_ko_newest_kernel" "nbd.ko for newest installed kernel" true \
-      "nbd module present for newest kernel ${newest}." \
-      "{\"kernel\":\"${newest}\",\"path\":\"${ko}\"}"
-  else
-    add_check "nbd_ko_newest_kernel" "nbd.ko for newest installed kernel" false \
-      "nbd.ko missing for newest installed kernel ${newest}; an unattended kernel update will break Firecracker nbd." \
-      "{\"kernel\":\"${newest}\",\"modules_dir\":\"${MODULES_DIR}/${newest}\"}"
-  fi
+  python3 - "${MODULES_DIR}" "${CHECKS_STATE}" "${FAILURES_STATE}" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+modules_dir, checks_path, failures_path = sys.argv[1:4]
+root = pathlib.Path(modules_dir)
+
+def kernel_key(name):
+    match = re.match(r"^(\d+(?:\.\d+)*)(.*)$", name)
+    if not match:
+        return ((-1,), 0, name)
+    nums = tuple(int(part) for part in match.group(1).split("."))
+    rest = match.group(2).lstrip("-")
+    is_release = 0 if re.search(r"(^|[.-])rc\d+", rest, re.I) else 1
+    return (nums, is_release, rest)
+
+def has_nbd(directory):
+    for path in directory.rglob("nbd.ko"):
+        return str(path)
+    for path in directory.rglob("nbd.ko.*"):
+        return str(path)
+    return ""
+
+def add(passed, message, details):
+    checks = json.load(open(checks_path, encoding="utf-8"))
+    checks.append({
+        "id": "nbd_ko_newest_kernel",
+        "name": "nbd.ko for newest installed kernel",
+        "passed": passed,
+        "message": message,
+        "details": details,
+    })
+    json.dump(checks, open(checks_path, "w", encoding="utf-8"))
+    if not passed:
+        failures = json.load(open(failures_path, encoding="utf-8"))
+        failures.append(message)
+        json.dump(failures, open(failures_path, "w", encoding="utf-8"))
+
+if not root.is_dir():
+    add(False, f"No installed kernels under {modules_dir}.", {})
+    raise SystemExit(0)
+
+dirs = [p for p in root.iterdir() if p.is_dir()]
+if not dirs:
+    add(False, f"No installed kernels under {modules_dir}.", {})
+    raise SystemExit(0)
+
+ranked = sorted(dirs, key=lambda p: kernel_key(p.name))
+newest_key = kernel_key(ranked[-1].name)
+flavors = [p for p in dirs if kernel_key(p.name)[:2] == newest_key[:2]]
+missing = []
+present = {}
+for flavor in flavors:
+    path = has_nbd(flavor)
+    if path:
+        present[flavor.name] = path
+    else:
+        missing.append(flavor.name)
+names = [p.name for p in flavors]
+if missing:
+    add(
+        False,
+        "nbd.ko missing for newest kernel flavor(s) "
+        + ", ".join(sorted(missing))
+        + "; an unattended kernel update will break Firecracker nbd.",
+        {"kernels": names, "missing": missing, "present": present},
+    )
+else:
+    add(
+        True,
+        "nbd module present for newest kernel flavor(s) " + ", ".join(sorted(names)) + ".",
+        {"kernels": names, "present": present},
+    )
+PY
 }
 
 check_disk() {
@@ -366,12 +419,39 @@ add(
     payload,
 )
 iso = payload.get("isolation") or {}
-iso_ok = iso.get("ok") is True
+required_iso = (
+    "ok", "targets_valid", "host_health", "npm", "lan",
+    "host_listener", "lan_listener",
+)
+missing_iso = [k for k in required_iso if k not in iso]
+iso_ok = (
+    not missing_iso
+    and iso.get("ok") is True
+    and iso.get("targets_valid") is True
+    and iso.get("host_health") == "blocked"
+    and iso.get("npm") == "ok"
+    and iso.get("lan") == "blocked"
+    and iso.get("host_listener") == "live"
+    and iso.get("lan_listener") == "live"
+)
 host_v = iso.get("host_health")
 npm_v = iso.get("npm")
 lan_v = iso.get("lan")
-if iso_ok:
+if missing_iso:
+    msg = "Isolation probe missing semantic fields: " + ", ".join(missing_iso)
+elif iso_ok:
     msg = "Isolation probe: host orchestrator blocked, npm reachable, LAN blocked."
+elif iso.get("targets_valid") is not True:
+    msg = (
+        "Isolation probe targets are invalid or not distinct "
+        f"(public={iso.get('public_ip')}, lan={iso.get('lan_ip')}, "
+        f"class={iso.get('public_class')}/{iso.get('lan_class')})."
+    )
+elif iso.get("host_listener") != "live" or iso.get("lan_listener") != "live":
+    msg = (
+        "Isolation probe listeners unproven "
+        f"(host_listener={iso.get('host_listener')}, lan_listener={iso.get('lan_listener')})."
+    )
 elif "inconclusive" in (host_v, npm_v, lan_v):
     msg = (
         "Isolation probe inconclusive "
@@ -384,21 +464,25 @@ PY
 }
 
 check_webhook() {
-  if [[ -z "${WEBHOOK_URL}" ]]; then
+  if [[ -z "${WEBHOOK_EXTERNAL_CMD}" ]]; then
     add_check "webhook_reachability" "Webhook reachability" false \
-      "DOCTOR_WEBHOOK_URL is not set." "{}"
+      "Skipped: no external webhook probe configured; inbound reachability is unverified." \
+      "{}" true
     return
   fi
-  local status
-  status="$(http_code "${WEBHOOK_URL}" || true)"
-  if [[ "${status}" == "200" ]]; then
+  local out rc
+  set +e
+  # shellcheck disable=SC2086
+  out="$(eval "${WEBHOOK_EXTERNAL_CMD}" 2>&1)"
+  rc=$?
+  set -e
+  if [[ "${rc}" -eq 0 && ( -z "${out}" || "${out}" == *200* || "${out}" == *ok* ) ]]; then
     add_check "webhook_reachability" "Webhook reachability" true \
-      "Public webhook health returned HTTP 200." "{\"url\":\"${WEBHOOK_URL}\"}"
-  else
-    add_check "webhook_reachability" "Webhook reachability" false \
-      "Public webhook endpoint ${WEBHOOK_URL} returned HTTP ${status}." \
-      "{\"url\":\"${WEBHOOK_URL}\",\"status\":\"${status}\"}"
+      "External webhook probe succeeded." "{\"rc\":0}"
+    return
   fi
+  add_check "webhook_reachability" "Webhook reachability" false \
+    "External webhook probe failed (exit ${rc})." "{\"rc\":${rc}}"
 }
 
 check_worker_fallback() {

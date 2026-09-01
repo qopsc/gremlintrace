@@ -16,6 +16,9 @@ doctor_kodus_web_health: "http://127.0.0.1:{{ kodus_web_port | default(3000) }}/
 doctor_kodus_api_health: "http://127.0.0.1:{{ kodus_api_port | default(3001) }}/health"
 doctor_kodus_webhooks_health: "http://127.0.0.1:{{ kodus_webhooks_port | default(3332) }}/health"
 doctor_webhook_url: "https://kodus-webhooks.{{ qops_domain }}/health"
+doctor_webhook_external_probe_cmd: ""
+doctor_host_public_ip: "{{ qops_public_ipv4 | default('') }}"
+doctor_lan_ip: "{{ qops_lan_ipv4 | default('') }}"
 doctor_modules_dir: /lib/modules
 doctor_nbd_sysfs: /sys/block
 doctor_meminfo: /proc/meminfo

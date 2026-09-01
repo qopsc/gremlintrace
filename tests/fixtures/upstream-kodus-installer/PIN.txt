@@ -1,1 +1,0 @@
-Snapshot of kodustech/kodus-installer@c51648aac1e15eba9ef300e94df5f5cbd36c9171 for offline bats tests.

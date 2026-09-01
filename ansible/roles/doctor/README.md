@@ -7,29 +7,31 @@ failure, then exits non-zero.
 
 | Exit | Meaning |
 |---|---|
-| 0 | Every check passed |
+| 0 | Every non-skipped check passed |
 | 1 | One or more checks failed |
 
 JSON report: `/etc/qops/doctor.json` (same shape as preflight: `version`, `timestamp`,
-`passed`, `checks[]`, `failures[]`).
+`passed`, `checks[]`, `failures[]`). Skipped checks set `skipped`/`unverified` and are
+**not** counted as passes or added to `failures`.
 
 ## Checks
 
 | id | What |
 |---|---|
-| `preflight` | Re-runs `run-preflight.sh` |
-| `unit_e2b_orchestrator` `unit_e2b_api` `unit_e2b_client_proxy` `unit_traefik` | systemd `is-active` |
+| `preflight` | Re-runs `run-preflight.sh`; malformed/truncated/wrong-schema reports fail this check and the rest still run |
+| `unit_*` | systemd `is-active` |
 | `hugepages` | Reports `HugePages_Free`; fails if total is 0 |
 | `nbd_in_use` | Counts nbd devices with nonzero size |
-| `nbd_ko_newest_kernel` | `nbd.ko` exists for the **newest installed** kernel under `/lib/modules` |
+| `nbd_ko_newest_kernel` | `nbd.ko` exists for **every flavor** of the newest installed kernel version (rc < release) |
 | `disk_usage` | `df` on `/var/lib/e2b` and `/orchestrator` |
 | `template_store` | `du` of `/var/lib/e2b/storage` |
-| `kodus_web_health` `kodus_api_health` `kodus_webhooks_health` | HTTP 200 on loopback health URLs |
+| `kodus_*_health` | HTTP 200 on loopback health URLs |
 | `rabbitmq_queues` | `rabbitmqctl list_queues` |
 | `e2b_smoke` | Create `kodus-sandbox`, `echo ok`, kill |
-| `isolation_probe` | Inside the sandbox: host `:5008/health` blocked, `registry.npmjs.org` ok, LAN HTTP blocked. Inconclusive (curl missing, DNS failure) is a failure |
-| `webhook_reachability` | `https://kodus-webhooks.<d>/health` |
+| `isolation_probe` | Distinct public vs LAN targets; host-side listener proof; sandbox deny of `:5008` and LAN; npm allow; `--noproxy '*'` |
+| `webhook_reachability` | External probe command (`doctor_webhook_external_probe_cmd`). Unconfigured → skipped/unverified, never passed |
 | `worker_fallback` | Worker logs must not contain `falling back to default` |
 
-`doctor.yml` still runs the Traefik hairpin gate (`hairpin.yml`, required) before this
-role's tasks in Ansible order (`roles` then `tasks` — hairpin is in `tasks`).
+Set `qops_public_ipv4` (globally routable) and `qops_lan_ipv4` (RFC1918, distinct). Empty or equal targets fail the isolation probe.
+
+`doctor.yml` still runs the Traefik hairpin gate in play tasks after this role.

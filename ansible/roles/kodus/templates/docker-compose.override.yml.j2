@@ -1,7 +1,7 @@
 ---
 services:
   kodus-web:
-    ports:
+    ports: !override
       - "{{ kodus_bind_host }}:{{ kodus_web_port }}:{{ kodus_web_port }}"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
@@ -16,7 +16,7 @@ services:
 {% endif %}
 
   api:
-    ports:
+    ports: !override
       - "{{ kodus_bind_host }}:{{ kodus_api_port }}:3001"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
@@ -59,7 +59,7 @@ services:
 {% endif %}
 
   webhooks:
-    ports:
+    ports: !override
       - "{{ kodus_bind_host }}:{{ kodus_webhooks_port }}:{{ kodus_webhooks_port }}"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
@@ -74,7 +74,7 @@ services:
 {% endif %}
 
   kodus-mcp-manager:
-    ports:
+    ports: !override
       - "{{ kodus_bind_host }}:{{ kodus_mcp_port }}:{{ kodus_mcp_port }}"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
@@ -89,14 +89,14 @@ services:
 {% endif %}
 
   rabbitmq:
-    ports:
+    ports: !override
       - "{{ kodus_bind_host }}:{{ kodus_rabbitmq_amqp_port }}:5672"
       - "{{ kodus_bind_host }}:{{ kodus_rabbitmq_mgmt_port }}:15672"
       - "{{ kodus_bind_host }}:{{ kodus_rabbitmq_metrics_port }}:15692"
 
   db_kodus_postgres:
     restart: unless-stopped
-    ports:
+    ports: !override
       - "{{ kodus_bind_host }}:{{ kodus_postgres_port }}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -104,5 +104,5 @@ services:
 
   db_kodus_mongodb:
     restart: unless-stopped
-    ports:
+    ports: !override
       - "{{ kodus_bind_host }}:{{ kodus_mongo_port }}:27017"

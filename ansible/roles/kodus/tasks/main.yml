@@ -40,6 +40,10 @@
     - kodus-install-if-needed.sh
     - kodus-wait-health.sh
     - kodus-print-callbacks.sh
+    - compose-merge-ports.py
+    - validate-kodus-webhooks.py
+    - interpret-kodus-doctor.py
+    - kodus-run-doctor.sh
   tags:
     - kodus
 
@@ -155,6 +159,9 @@
       openai_api_key: "{{ kodus_openai_api_key_effective }}"
       openai_force_base_url: "{{ kodus_openai_force_base_url }}"
       web_port_api: "{{ kodus_web_port_api }}"
+      hairpin_fallback: "{{ kodus_extra_hosts_hairpin | bool }}"
+      e2b_api_url: "https://api.{{ kodus_e2b_domain }}"
+      e2b_sandbox_url: "https://sandbox.{{ kodus_e2b_domain }}"
       env_overrides: "{{ kodus_env_overrides }}"
   no_log: true
   tags:
@@ -209,12 +216,31 @@
   tags:
     - kodus
 
-- name: Start Kodus via install.sh when the stack is not healthy
+- name: Fail if merged Compose ports are not bound to loopback
+  ansible.builtin.command:
+    cmd: >-
+      python3 /usr/local/lib/qops/compose-merge-ports.py check
+      --base {{ kodus_install_dir }}/docker-compose.yml
+      --override {{ kodus_compose_override }}
+      --env-file {{ kodus_env_file }}
+      --require-ip {{ kodus_bind_host }}
+  register: kodus_compose_bind_check
+  changed_when: false
+  tags:
+    - kodus
+
+- name: Start Kodus via install.sh when desired state changed
   ansible.builtin.command:
     cmd: >-
       /usr/local/lib/qops/kodus-install-if-needed.sh
       {{ kodus_install_dir }}
-      {{ kodus_health_urls | join(' ') }}
+      {{ kodus_digest_file }}
+      {{ kodus_installer_ref }}
+  environment:
+    KODUS_COMPOSE_MERGE_PY: /usr/local/lib/qops/compose-merge-ports.py
+    KODUS_COMPOSE_BASE: "{{ kodus_install_dir }}/docker-compose.yml"
+    KODUS_COMPOSE_OVERRIDE: "{{ kodus_compose_override }}"
+    KODUS_ENV_FILE: "{{ kodus_env_file }}"
   register: kodus_install
   changed_when: (kodus_install.stdout_lines | last | default('')) == "installed"
   tags:
@@ -232,10 +258,14 @@
   tags:
     - kodus
 
-- name: Run upstream Kodus doctor.sh
+- name: Validate webhooks and run upstream doctor.sh
   ansible.builtin.command:
-    cmd: bash {{ kodus_install_dir }}/scripts/doctor.sh
-    chdir: "{{ kodus_install_dir }}"
+    cmd: >-
+      /usr/local/lib/qops/kodus-run-doctor.sh
+      {{ kodus_env_file }}
+      {{ kodus_webhooks_host }}
+      {{ kodus_api_host }}
+      {{ kodus_install_dir }}
   register: kodus_upstream_doctor
   changed_when: false
   tags:
