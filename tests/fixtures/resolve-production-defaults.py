@@ -22,6 +22,8 @@ ROLES = (
     "e2b_services",
     "e2b_templates",
     "traefik",
+    "kodus",
+    "doctor",
 )
 
 JINJA_BLOCK = re.compile(r"\{\{-?(.+?)-?\}\}|\{%-?(.+?)-?\%\}", re.DOTALL)
@@ -57,6 +59,7 @@ IGNORED_NAMES = frozenset(
         "query",
         "env",
         "from_json",
+        "to_nice_json",
         "to_json",
         "b64decode",
         "join",

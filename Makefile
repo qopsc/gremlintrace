@@ -23,7 +23,10 @@ lint: syntax-check templates-ci
 	ansible/roles/e2b_datastores/files/*.sh \
 	ansible/roles/e2b_services/files/*.sh \
 	ansible/roles/e2b_templates/files/*.sh \
-	ansible/roles/traefik/files/*.sh
+	ansible/roles/traefik/files/*.sh \
+	ansible/roles/kodus/files/*.sh \
+	ansible/roles/doctor/files/qops-doctor \
+	ansible/roles/doctor/files/*.sh
 	npm --prefix $(TEMPLATES_DIR) run typecheck
 
 syntax-check:
