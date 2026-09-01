@@ -89,7 +89,7 @@ raise SystemExit(0 if d.get("ok") and d.get("echo") == "ok" and d.get("killed") 
 PY
   exit $?
 fi
-echo '{"ok": true, "echo": "ok", "killed": true, "isolation": {"ok": true, "host_health": "blocked", "npm": "ok", "lan": "blocked"}}'
+echo '{"ok": true, "echo": "ok", "killed": true, "isolation": {"ok": true, "targets_valid": true, "host_health": "blocked", "npm": "ok", "lan": "blocked", "host_listener": "live", "lan_listener": "live", "public_ip": "8.8.8.8", "lan_ip": "10.0.0.5", "public_class": "public", "lan_class": "private"}}'
 exit 0
 EOF
   chmod +x "${ROOT}/bin/"*
@@ -124,7 +124,7 @@ doctor_ids() {
   python3 - "$1" <<'PY'
 import json, sys
 report = json.load(open(sys.argv[1]))
-print(" ".join(c["id"] for c in report["checks"] if not c["passed"]))
+print(" ".join(c["id"] for c in report["checks"] if not c["passed"] and not c.get("skipped")))
 PY
 }
 
@@ -147,6 +147,9 @@ for expected in (
     "worker_fallback",
 ):
     assert expected in ids, expected
+webhook = next(c for c in r["checks"] if c["id"] == "webhook_reachability")
+assert webhook.get("skipped") is True, webhook
+assert webhook["passed"] is False
 print("ok")
 PY
 }
@@ -171,7 +174,8 @@ PY
   fail_one() {
     local id="$1" mode="$2"
     unset DOCTOR_FAIL_UNIT DOCTOR_CURL_FAIL_URL DOCTOR_DF_PERCENT DOCTOR_DOCKER_FAIL \
-      DOCTOR_SMOKE_JSON DOCTOR_WORKER_LOG DOCTOR_NBD_SYSFS DOCTOR_TEMPLATE_STORE DOCTOR_WEBHOOK_URL
+      DOCTOR_SMOKE_JSON DOCTOR_WORKER_LOG DOCTOR_NBD_SYSFS DOCTOR_TEMPLATE_STORE \
+      DOCTOR_WEBHOOK_URL DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD
     prepare_world
     pass_env
     case "${mode}" in
@@ -200,12 +204,14 @@ EOF
       web) export DOCTOR_CURL_FAIL_URL="http://127.0.0.1:3000/health" ;;
       rabbit) export DOCTOR_DOCKER_FAIL=1 ;;
       smoke)
-        export DOCTOR_SMOKE_JSON='{"ok": false, "echo": "fail", "killed": false, "isolation": {"ok": true, "host_health": "blocked", "npm": "ok", "lan": "blocked"}}'
+        export DOCTOR_SMOKE_JSON='{"ok": false, "echo": "fail", "killed": false, "isolation": {"ok": true, "targets_valid": true, "host_health": "blocked", "npm": "ok", "lan": "blocked", "host_listener": "live", "lan_listener": "live"}}'
         ;;
       isolation)
-        export DOCTOR_SMOKE_JSON='{"ok": true, "echo": "ok", "killed": true, "isolation": {"ok": false, "host_health": "inconclusive", "npm": "ok", "lan": "blocked"}}'
+        export DOCTOR_SMOKE_JSON='{"ok": true, "echo": "ok", "killed": true, "isolation": {"ok": false, "targets_valid": true, "host_health": "inconclusive", "npm": "ok", "lan": "blocked", "host_listener": "live", "lan_listener": "live"}}'
         ;;
-      webhook) export DOCTOR_WEBHOOK_URL="" ;;
+      webhook)
+        export DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD="false"
+        ;;
       fallback) export DOCTOR_WORKER_LOG="usedTemplate=false falling back to default" ;;
     esac
     run bash "${DOCTOR}"
@@ -216,7 +222,7 @@ EOF
 import json, sys
 r = json.load(open(sys.argv[1]))
 assert r["passed"] is False
-assert any(sys.argv[2] in f or True for f in r["failures"])
+assert any(c["id"] == sys.argv[2] and not c["passed"] and not c.get("skipped") for c in r["checks"])
 assert r["failures"], r
 print("failures", len(r["failures"]))
 PY
@@ -295,8 +301,9 @@ EOF
   export DOCTOR_CURL_FAIL_URL="http://127.0.0.1:3000/health"
   export DOCTOR_DOCKER_FAIL=1
   export DOCTOR_WEBHOOK_URL=""
+  export DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD="false"
   export DOCTOR_WORKER_LOG="falling back to default"
-  export DOCTOR_SMOKE_JSON='{"ok": false, "echo": "fail", "killed": false, "isolation": {"ok": false, "host_health": "reachable", "npm": "fail", "lan": "inconclusive"}}'
+  export DOCTOR_SMOKE_JSON='{"ok": false, "echo": "fail", "killed": false, "isolation": {"ok": false, "targets_valid": true, "host_health": "reachable", "npm": "fail", "lan": "inconclusive", "host_listener": "live", "lan_listener": "dead"}}'
   run bash "${DOCTOR}"
   [ "$status" -eq 1 ]
   python3 - "${ROOT}/doctor.json" <<'PY'
@@ -357,19 +364,36 @@ for arg in "$@"; do
   esac
 done
 case "${url}" in
-  *203.0.113.9:5008*) exit 28 ;;
+  *127.0.0.1:5008*) echo -n 200; exit 0 ;;
+  *8.8.8.8:5008*) exit 28 ;;
   *registry.npmjs.org*) echo -n 200; exit 0 ;;
   *10.0.0.5*) exit 7 ;;
   *) echo -n 000; exit 1 ;;
 esac
 EOF
   chmod +x "${ROOT}/bin/curl-probe"
-  run env ISOLATION_CURL="${ROOT}/bin/curl-probe" bash "${PROBE}" 203.0.113.9 10.0.0.5
+  run env ISOLATION_CURL="${ROOT}/bin/curl-probe" \
+    DOCTOR_ORCH_HEALTH_URL="http://127.0.0.1:5008/health" \
+    DOCTOR_LAN_CONTROL_URL="http://127.0.0.1:5008/health" \
+    bash "${PROBE}" --host-proof 8.8.8.8 10.0.0.5
   [ "$status" -eq 0 ]
   python3 -c '
 import json, sys
 d = json.loads(sys.argv[1].strip().splitlines()[-1])
 assert d["ok"] is True
+assert d["host_listener"] == "live"
+assert d["lan_listener"] == "live"
+print("ok")
+' "$output"
+
+  run env ISOLATION_CURL="${ROOT}/bin/curl-probe" ISOLATION_HOST_LISTENER=live ISOLATION_LAN_LISTENER=live \
+    bash "${PROBE}" --sandbox 8.8.8.8 10.0.0.5
+  [ "$status" -eq 0 ]
+  python3 -c '
+import json, sys
+d = json.loads(sys.argv[1].strip().splitlines()[-1])
+assert d["ok"] is True
+assert d["targets_valid"] is True
 assert d["host_health"] == "blocked"
 assert d["npm"] == "ok"
 assert d["lan"] == "blocked"
@@ -385,13 +409,14 @@ for arg in "$@"; do
   esac
 done
 case "${url}" in
-  *203.0.113.9:5008*) echo -n 200; exit 0 ;;
+  *8.8.8.8:5008*) echo -n 200; exit 0 ;;
   *registry.npmjs.org*) echo -n 200; exit 0 ;;
   *10.0.0.5*) exit 7 ;;
   *) exit 1 ;;
 esac
 EOF
-  run env ISOLATION_CURL="${ROOT}/bin/curl-probe" bash "${PROBE}" 203.0.113.9 10.0.0.5
+  run env ISOLATION_CURL="${ROOT}/bin/curl-probe" ISOLATION_HOST_LISTENER=live ISOLATION_LAN_LISTENER=live \
+    bash "${PROBE}" --sandbox 8.8.8.8 10.0.0.5
   [ "$status" -eq 1 ]
   python3 -c '
 import json, sys
@@ -401,7 +426,8 @@ assert d["host_health"] == "reachable"
 print("ok")
 ' "$output"
 
-  run env ISOLATION_CURL="${ROOT}/missing-curl" bash "${PROBE}" 203.0.113.9 10.0.0.5
+  run env ISOLATION_CURL="${ROOT}/missing-curl" ISOLATION_HOST_LISTENER=live ISOLATION_LAN_LISTENER=live \
+    bash "${PROBE}" --sandbox 8.8.8.8 10.0.0.5
   [ "$status" -eq 1 ]
   python3 -c '
 import json, sys
@@ -414,9 +440,119 @@ print("ok")
 ' "$output"
 }
 
+@test "isolation probe rejects NAT private public IP, equal targets, and invalid addresses" {
+  run bash "${PROBE}" --sandbox 10.0.0.8 10.0.0.5
+  [ "$status" -eq 1 ]
+  python3 -c '
+import json, sys
+d = json.loads(sys.argv[1].strip().splitlines()[-1])
+assert d["ok"] is False
+assert d["targets_valid"] is False
+assert d["public_class"] == "private"
+print("ok")
+' "$output"
+
+  run bash "${PROBE}" --sandbox 8.8.8.8 8.8.8.8
+  [ "$status" -eq 1 ]
+  python3 -c '
+import json, sys
+d = json.loads(sys.argv[1].strip().splitlines()[-1])
+assert d["ok"] is False
+assert d["targets_valid"] is False
+print("ok")
+' "$output"
+
+  run bash "${PROBE}" --sandbox not-an-ip 10.0.0.5
+  [ "$status" -eq 1 ]
+  python3 -c '
+import json, sys
+d = json.loads(sys.argv[1].strip().splitlines()[-1])
+assert d["ok"] is False
+assert d["public_class"] == "invalid"
+print("ok")
+' "$output"
+}
+
+@test "isolation probe treats a dead listener as unproven rather than blocked" {
+  cat >"${ROOT}/bin/curl-dead" <<'EOF'
+#!/usr/bin/env bash
+exit 7
+EOF
+  chmod +x "${ROOT}/bin/curl-dead"
+  run env ISOLATION_CURL="${ROOT}/bin/curl-dead" bash "${PROBE}" --host-proof 8.8.8.8 10.0.0.5
+  [ "$status" -eq 1 ]
+  python3 -c '
+import json, sys
+d = json.loads(sys.argv[1].strip().splitlines()[-1])
+assert d["ok"] is False
+assert d["host_listener"] == "dead"
+print("ok")
+' "$output"
+
+  cat >"${ROOT}/bin/curl-sandbox" <<'EOF'
+#!/usr/bin/env bash
+url=""
+for arg in "$@"; do
+  case "${arg}" in http*|https*) url="${arg}" ;; esac
+done
+case "${url}" in
+  *8.8.8.8:5008*) exit 28 ;;
+  *registry.npmjs.org*) echo -n 200; exit 0 ;;
+  *10.0.0.5*) exit 7 ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod +x "${ROOT}/bin/curl-sandbox"
+  run env ISOLATION_CURL="${ROOT}/bin/curl-sandbox" ISOLATION_HOST_LISTENER=unproven ISOLATION_LAN_LISTENER=live \
+    bash "${PROBE}" --sandbox 8.8.8.8 10.0.0.5
+  [ "$status" -eq 1 ]
+  python3 -c '
+import json, sys
+d = json.loads(sys.argv[1].strip().splitlines()[-1])
+assert d["ok"] is False
+assert d["host_health"] == "inconclusive"
+print("ok")
+' "$output"
+}
+
+@test "isolation probe bypasses HTTP proxy environment variables" {
+  cat >"${ROOT}/bin/curl-proxy" <<'EOF'
+#!/usr/bin/env bash
+has_noproxy=0
+for arg in "$@"; do
+  if [[ "${arg}" == "--noproxy" || "${arg}" == --noproxy=* ]]; then
+    has_noproxy=1
+  fi
+done
+if [[ "${has_noproxy}" -ne 1 ]]; then
+  echo "proxy-used" >&2
+  exit 1
+fi
+url=""
+for arg in "$@"; do
+  case "${arg}" in http*|https*) url="${arg}" ;; esac
+done
+case "${url}" in
+  *127.0.0.1:5008*) echo -n 200; exit 0 ;;
+  *8.8.8.8:5008*) exit 28 ;;
+  *registry.npmjs.org*) echo -n 200; exit 0 ;;
+  *10.0.0.5*) exit 7 ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod +x "${ROOT}/bin/curl-proxy"
+  run env HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 \
+    http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 \
+    ISOLATION_CURL="${ROOT}/bin/curl-proxy" ISOLATION_HOST_LISTENER=live ISOLATION_LAN_LISTENER=live \
+    bash "${PROBE}" --sandbox 8.8.8.8 10.0.0.5
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"proxy-used"* ]]
+}
+
 @test "qops-doctor isolation check fails on inconclusive smoke output" {
   pass_env
-  export DOCTOR_SMOKE_JSON='{"ok": true, "echo": "ok", "killed": true, "isolation": {"ok": false, "host_health": "inconclusive", "npm": "inconclusive", "lan": "inconclusive"}}'
+  export DOCTOR_SMOKE_JSON='{"ok": true, "echo": "ok", "killed": true, "isolation": {"ok": false, "targets_valid": true, "host_health": "inconclusive", "npm": "inconclusive", "lan": "inconclusive", "host_listener": "live", "lan_listener": "live"}}'
   run bash "${DOCTOR}"
   [ "$status" -eq 1 ]
   python3 - "${ROOT}/doctor.json" <<'PY'
@@ -450,7 +586,8 @@ for arg in "$@"; do
   case "${arg}" in http*|https*) url="${arg}" ;; esac
 done
 case "${url}" in
-  *1.2.3.4:5008*) exit 28 ;;
+  *127.0.0.1:5008*) echo -n 200; exit 0 ;;
+  *8.8.4.4:5008*) exit 28 ;;
   *registry.npmjs.org*) echo -n 200; exit 0 ;;
   *10.1.2.3*) exit 7 ;;
   *) exit 1 ;;
@@ -462,8 +599,10 @@ EOF
     DOCTOR_SANDBOX_EXEC_CMD="${ROOT}/bin/execs" \
     DOCTOR_SANDBOX_KILL_CMD="${ROOT}/bin/kill" \
     DOCTOR_ISOLATION_PROBE_SCRIPT="${PROBE}" \
-    DOCTOR_HOST_PUBLIC_IP=1.2.3.4 \
+    DOCTOR_HOST_PUBLIC_IP=8.8.4.4 \
     DOCTOR_LAN_IP=10.1.2.3 \
+    DOCTOR_ORCH_HEALTH_URL="http://127.0.0.1:5008/health" \
+    DOCTOR_LAN_CONTROL_URL="http://127.0.0.1:5008/health" \
     ISOLATION_CURL="${ROOT}/bin/curl-probe" \
     bash "${SMOKE}"
   echo "$output"
@@ -477,4 +616,104 @@ assert d["isolation"]["ok"] is True
 assert d["killed"] is True
 print("ok")
 ' "$output"
+}
+
+@test "malformed truncated and wrong-schema preflight reports fail and continue" {
+  pass_env
+  cat >"${ROOT}/bin/preflight" <<'EOF'
+#!/usr/bin/env bash
+printf '{not json' >"${PREFLIGHT_REPORT_PATH}"
+exit 0
+EOF
+  chmod +x "${ROOT}/bin/preflight"
+  export DOCTOR_FAIL_UNIT=traefik
+  run bash "${DOCTOR}"
+  [ "$status" -eq 1 ]
+  python3 - "${ROOT}/doctor.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+ids = {c["id"] for c in r["checks"]}
+failed = {c["id"] for c in r["checks"] if not c["passed"] and not c.get("skipped")}
+assert "preflight" in failed
+assert "unit_traefik" in failed
+assert "hugepages" in ids
+assert "worker_fallback" in ids
+print("malformed")
+PY
+
+  prepare_world
+  pass_env
+  cat >"${ROOT}/bin/preflight" <<'EOF'
+#!/usr/bin/env bash
+printf '{"version":1,"timestamp":"t"' >"${PREFLIGHT_REPORT_PATH}"
+exit 0
+EOF
+  chmod +x "${ROOT}/bin/preflight"
+  export DOCTOR_WORKER_LOG="falling back to default"
+  run bash "${DOCTOR}"
+  [ "$status" -eq 1 ]
+  python3 - "${ROOT}/doctor.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+failed = {c["id"] for c in r["checks"] if not c["passed"] and not c.get("skipped")}
+assert "preflight" in failed
+assert "worker_fallback" in failed
+print("truncated")
+PY
+
+  prepare_world
+  pass_env
+  cat >"${ROOT}/bin/preflight" <<'EOF'
+#!/usr/bin/env bash
+cat >"${PREFLIGHT_REPORT_PATH}" <<'JSON'
+{"version": 99, "timestamp": "t", "passed": true, "checks": [], "failures": []}
+JSON
+exit 0
+EOF
+  chmod +x "${ROOT}/bin/preflight"
+  export DOCTOR_FAIL_UNIT=e2b-api
+  run bash "${DOCTOR}"
+  [ "$status" -eq 1 ]
+  python3 - "${ROOT}/doctor.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+failed = {c["id"] for c in r["checks"] if not c["passed"] and not c.get("skipped")}
+pre = next(c for c in r["checks"] if c["id"] == "preflight")
+assert pre["passed"] is False
+assert "schema" in pre["message"].lower() or "version" in pre["message"].lower()
+assert "unit_e2b_api" in failed
+print("wrong-schema")
+PY
+}
+
+@test "nbd.ko check covers every flavor at the newest version including rc kernels" {
+  pass_env
+  mkdir -p "${ROOT}/modules/6.11.0-generic/kernel" "${ROOT}/modules/6.11.0-1-amd64/kernel"
+  touch "${ROOT}/modules/6.11.0-generic/kernel/nbd.ko"
+  run bash "${DOCTOR}"
+  [ "$status" -eq 1 ]
+  python3 - "${ROOT}/doctor.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+nbd = next(c for c in r["checks"] if c["id"] == "nbd_ko_newest_kernel")
+assert nbd["passed"] is False, nbd
+assert "6.11.0-1-amd64" in nbd["message"], nbd
+print("flavor")
+PY
+
+  prepare_world
+  pass_env
+  mkdir -p "${ROOT}/modules/6.12.0-rc1/kernel"
+  rm -f "${ROOT}/modules/6.11.0/kernel/nbd.ko"
+  touch "${ROOT}/modules/6.8.0/kernel/nbd.ko"
+  run bash "${DOCTOR}"
+  [ "$status" -eq 1 ]
+  python3 - "${ROOT}/doctor.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+nbd = next(c for c in r["checks"] if c["id"] == "nbd_ko_newest_kernel")
+assert nbd["passed"] is False, nbd
+assert "6.12.0-rc1" in nbd["message"], nbd
+print("rc")
+PY
 }

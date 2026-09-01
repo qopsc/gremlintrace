@@ -69,8 +69,21 @@ kodus_llm_provider_model: "auto"
 kodus_openai_force_base_url: ""
 
 # When true, Kodus containers get extra_hosts for api.e2b.<d> and sandbox.e2b.<d>
-# pointing at host-gateway so the worker can hairpin through Traefik.
+# pointing at host-gateway so the worker can hairpin through Traefik, and .env
+# sets E2B_API_URL / E2B_SANDBOX_URL to those names (Phase 3 broken-hairpin fallback).
 kodus_extra_hosts_hairpin: true
+
+# Globally routable IPv4 for the sandbox isolation probe. Empty fails the probe
+# rather than silently using a private address.
+qops_public_ipv4: ""
+
+# RFC1918/LAN IPv4 for the isolation probe. Must differ from qops_public_ipv4.
+qops_lan_ipv4: ""
+
+# Command that probes kodus-webhooks from a host that is not this machine.
+# Empty: doctor reports webhook reachability as skipped/unverified, never passed.
+# Example: ssh edge.example.net 'curl -fsS -o /dev/null -w %{http_code} https://kodus-webhooks.example.com/health'
+doctor_webhook_external_probe_cmd: ""
 
 # Backup destination: local, s3, or rsync.
 backup_target: "local"

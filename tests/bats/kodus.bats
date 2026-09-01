@@ -10,6 +10,10 @@ setup() {
   INSTALL_SH="${REPO_ROOT}/ansible/roles/kodus/files/kodus-install-if-needed.sh"
   NETWORKS_SH="${REPO_ROOT}/ansible/roles/kodus/files/kodus-ensure-networks.sh"
   CALLBACKS_SH="${REPO_ROOT}/ansible/roles/kodus/files/kodus-print-callbacks.sh"
+  MERGE_PY="${REPO_ROOT}/ansible/roles/kodus/files/compose-merge-ports.py"
+  VALIDATE_PY="${REPO_ROOT}/ansible/roles/kodus/files/validate-kodus-webhooks.py"
+  INTERPRET_PY="${REPO_ROOT}/ansible/roles/kodus/files/interpret-kodus-doctor.py"
+  RUN_DOCTOR_SH="${REPO_ROOT}/ansible/roles/kodus/files/kodus-run-doctor.sh"
   WORKDIR="${BATS_TMPDIR}/kodus-work"
   rm -rf "${WORKDIR}"
   mkdir -p "${WORKDIR}/installer/scripts" "${WORKDIR}/persist" "${WORKDIR}/bin"
@@ -44,6 +48,7 @@ cfg = {
     "openai_api_key": "sk-test",
     "openai_force_base_url": "",
     "web_port_api": "443",
+    "hairpin_fallback": True,
     "env_overrides": {},
 }
 out.write_text(json.dumps(cfg))
@@ -106,6 +111,8 @@ PY
   [ "$(dotenv_get "${envf}" API_FORGEJO_CODE_MANAGEMENT_WEBHOOK)" = "https://kodus-webhooks.example.com/forgejo/webhook" ]
   [ "$(dotenv_get "${envf}" API_LLM_PROVIDER_MODEL)" = "auto" ]
   [ "$(dotenv_get "${envf}" API_OPEN_AI_API_KEY)" = "sk-test" ]
+  [ "$(dotenv_get "${envf}" E2B_API_URL)" = "https://api.e2b.example.com" ]
+  [ "$(dotenv_get "${envf}" E2B_SANDBOX_URL)" = "https://sandbox.e2b.example.com" ]
   tag="$(dotenv_get "${envf}" IMAGE_TAG)"
   [ "${tag}" != "latest" ]
   [ -n "${tag}" ]
@@ -198,49 +205,15 @@ EOF
   [[ "$output" == *"Starting containers"* ]]
 }
 
-@test "install.sh invocation is gated so a healthy stack is not force-recreated" {
+@test "install.sh is gated on desired-state digest and container existence" {
   render_env
-  cat >"${WORKDIR}/bin/curl" <<'EOF'
-#!/usr/bin/env bash
-echo -n 200
-EOF
-  chmod +x "${WORKDIR}/bin/curl"
-  cat >"${WORKDIR}/installer/scripts/install.sh" <<'EOF'
-#!/usr/bin/env bash
-echo FORCE-RECREATE
-exit 0
-EOF
-  run env PATH="${WORKDIR}/bin:${PATH}" KODUS_CURL_BIN="${WORKDIR}/bin/curl" \
-    bash "${INSTALL_SH}" "${WORKDIR}/installer" \
-    http://127.0.0.1:3000/health http://127.0.0.1:3001/health
-  [ "$status" -eq 0 ]
-  [ "$output" = "skipped-healthy" ]
-  [[ "$output" != *"FORCE-RECREATE"* ]]
-
-  cat >"${WORKDIR}/bin/curl" <<'EOF'
-#!/usr/bin/env bash
-echo -n 000
-exit 1
-EOF
-  run env PATH="${WORKDIR}/bin:${PATH}" KODUS_CURL_BIN="${WORKDIR}/bin/curl" \
-    bash "${INSTALL_SH}" "${WORKDIR}/installer" \
-    http://127.0.0.1:3000/health
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"FORCE-RECREATE"* ]]
-  [[ "$output" == *"installed"* ]]
-}
-
-@test "compose override rebinds every upstream published port to 127.0.0.1" {
-  run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" "${WORKDIR}/installer/docker-compose.yml" <<'PY'
-import json
-import pathlib
-import subprocess
-import sys
-import yaml
-
+  bash "${REPO_ROOT}/tests/fixtures/render-template.sh" \
+    ansible/roles/kodus/templates/docker-compose.override.yml.j2 \
+    >"${WORKDIR}/installer/docker-compose.override.yml" || true
+  python3 - "${REPO_ROOT}" "${WORKDIR}" <<'PY'
+import pathlib, subprocess, sys, yaml, tempfile
 root = pathlib.Path(sys.argv[1])
-tmpdir = pathlib.Path(sys.argv[2])
-upstream = yaml.safe_load(pathlib.Path(sys.argv[3]).read_text())
+workdir = pathlib.Path(sys.argv[2])
 merged = {}
 for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
     merged.update(yaml.safe_load(path.read_text()) or {})
@@ -251,40 +224,185 @@ for role in (
     defaults = root / f"ansible/roles/{role}/defaults/main.yml"
     if defaults.is_file():
         merged.update(yaml.safe_load(defaults.read_text()) or {})
-vars_file = tmpdir / "kodus-vars.yml"
+vars_file = workdir / "kodus-vars.yml"
 vars_file.write_text(yaml.safe_dump(merged))
+text = subprocess.check_output(
+    ["bash", str(root / "tests/fixtures/render-template.sh"),
+     "ansible/roles/kodus/templates/docker-compose.override.yml.j2", str(vars_file)],
+    text=True, cwd=root,
+)
+(workdir / "installer" / "docker-compose.override.yml").write_text(text)
+PY
+  cat >"${WORKDIR}/installer/scripts/install.sh" <<'EOF'
+#!/usr/bin/env bash
+echo FORCE-RECREATE
+exit 0
+EOF
+  chmod +x "${WORKDIR}/installer/scripts/install.sh"
+  digest="$(python3 "${MERGE_PY}" digest --base "${WORKDIR}/installer/docker-compose.yml" \
+    --override "${WORKDIR}/installer/docker-compose.override.yml" \
+    --env-file "${WORKDIR}/installer/.env" --ref testdigest)"
+  printf '%s\n' "${digest}" >"${WORKDIR}/persist/install.digest"
+  cat >"${WORKDIR}/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *ps* ]]; then
+  echo cid-running
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "${WORKDIR}/bin/docker"
+  run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
+    KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
+  echo "unchanged: $output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "skipped-unchanged" ]
+  [[ "$output" != *"FORCE-RECREATE"* ]]
+
+  cat >"${WORKDIR}/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *ps* ]]; then
+  exit 0
+fi
+exit 0
+EOF
+  run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
+    KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
+  echo "missing-containers: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FORCE-RECREATE"* ]]
+  [[ "$output" == *"installed"* ]]
+
+  printf '%s\n' "${digest}" >"${WORKDIR}/persist/install.digest"
+  cat >"${WORKDIR}/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+echo cid-running
+exit 0
+EOF
+  python3 - "${WORKDIR}/installer/.env" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text().replace("IMAGE_TAG=2.1.31", "IMAGE_TAG=2.1.99", 1)
+if "IMAGE_TAG=2.1.99" not in text:
+    text = text.replace("IMAGE_TAG=", "IMAGE_TAG=2.1.99\nX=", 1)
+path.write_text(text)
+PY
+  run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
+    KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
+  echo "changed-env: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FORCE-RECREATE"* ]]
+
+  cat >"${WORKDIR}/installer/scripts/install.sh" <<'EOF'
+#!/usr/bin/env bash
+echo INSTALL-FAILED
+exit 1
+EOF
+  : >"${WORKDIR}/persist/install.digest"
+  run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
+    KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
+  [ "$status" -ne 0 ]
+  [ ! -s "${WORKDIR}/persist/install.digest" ] || [ "$(cat "${WORKDIR}/persist/install.digest")" = "" ]
+}
+
+@test "merged compose config rebinds every upstream published port to 127.0.0.1" {
+  run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" "${WORKDIR}/installer/docker-compose.yml" "${MERGE_PY}" <<'PY'
+import json
+import pathlib
+import subprocess
+import sys
+import yaml
+
+root = pathlib.Path(sys.argv[1])
+tmpdir = pathlib.Path(sys.argv[2])
+upstream_path = pathlib.Path(sys.argv[3])
+merge_py = pathlib.Path(sys.argv[4])
+merged_vars = {}
+for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+    merged_vars.update(yaml.safe_load(path.read_text()) or {})
+for role in (
+    "preflight", "common", "host_firewall", "docker", "e2b_host",
+    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
+):
+    defaults = root / f"ansible/roles/{role}/defaults/main.yml"
+    if defaults.is_file():
+        merged_vars.update(yaml.safe_load(defaults.read_text()) or {})
+vars_file = tmpdir / "kodus-vars.yml"
+vars_file.write_text(yaml.safe_dump(merged_vars))
 override_text = subprocess.check_output(
     ["bash", str(root / "tests/fixtures/render-template.sh"),
      "ansible/roles/kodus/templates/docker-compose.override.yml.j2", str(vars_file)],
     text=True, cwd=root,
 )
-override = yaml.safe_load(override_text)
-assert override, override_text
-up_ports = {}
-for name, svc in (upstream.get("services") or {}).items():
-    ports = svc.get("ports") or []
-    if ports:
-        up_ports[name] = ports
-ov_services = override.get("services") or {}
-missing = sorted(set(up_ports) - set(ov_services))
-assert not missing, f"override missing services with published ports: {missing}"
-for name, ports in up_ports.items():
-    ov_ports = ov_services[name].get("ports") or []
-    assert len(ov_ports) >= len(ports), (name, ports, ov_ports)
-    for mapping in ov_ports:
-        assert str(mapping).startswith("127.0.0.1:"), (name, mapping)
-        assert "0.0.0.0" not in str(mapping)
-assert "0.0.0.0" not in override_text
-postgres = ov_services["db_kodus_postgres"]
-assert postgres.get("restart") == "unless-stopped"
-mongo = ov_services["db_kodus_mongodb"]
-assert mongo.get("restart") == "unless-stopped"
-vol = " ".join(str(v) for v in postgres.get("volumes") or [])
-assert ":z" in vol
+assert "ports: !override" in override_text, override_text
+override_path = tmpdir / "docker-compose.override.yml"
+override_path.write_text(override_text)
+report = json.loads(subprocess.check_output(
+    ["python3", str(merge_py), "check", "--base", str(upstream_path),
+     "--override", str(override_path), "--require-ip", "127.0.0.1"],
+    text=True, cwd=root,
+))
+assert report["ok"] is True, report
+assert report["violations"] == []
+assert report["missing_upstream_targets"] == []
+for item in report["ports"]:
+    assert item["effective_ip"] == "127.0.0.1", item
+tags = report["override_ports_tags"]
+assert tags, tags
+assert all(tag == "!override" for tag in tags.values()), tags
 print("ok")
 PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
+}
+
+@test "compose merge check fails if !override is removed" {
+  run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" "${WORKDIR}/installer/docker-compose.yml" "${MERGE_PY}" <<'PY'
+import json, pathlib, subprocess, sys, yaml
+root = pathlib.Path(sys.argv[1])
+tmpdir = pathlib.Path(sys.argv[2])
+upstream_path = pathlib.Path(sys.argv[3])
+merge_py = pathlib.Path(sys.argv[4])
+merged_vars = {}
+for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+    merged_vars.update(yaml.safe_load(path.read_text()) or {})
+for role in (
+    "preflight", "common", "host_firewall", "docker", "e2b_host",
+    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
+):
+    defaults = root / f"ansible/roles/{role}/defaults/main.yml"
+    if defaults.is_file():
+        merged_vars.update(yaml.safe_load(defaults.read_text()) or {})
+vars_file = tmpdir / "kodus-vars-no-override.yml"
+vars_file.write_text(yaml.safe_dump(merged_vars))
+override_text = subprocess.check_output(
+    ["bash", str(root / "tests/fixtures/render-template.sh"),
+     "ansible/roles/kodus/templates/docker-compose.override.yml.j2", str(vars_file)],
+    text=True, cwd=root,
+)
+stripped = override_text.replace("ports: !override", "ports:")
+assert "ports: !override" not in stripped
+override_path = tmpdir / "docker-compose.override.no-tag.yml"
+override_path.write_text(stripped)
+proc = subprocess.run(
+    ["python3", str(merge_py), "check", "--base", str(upstream_path),
+     "--override", str(override_path), "--require-ip", "127.0.0.1"],
+    text=True, cwd=root, capture_output=True,
+)
+report = json.loads(proc.stdout)
+assert proc.returncode != 0, report
+assert report["ok"] is False
+assert report["violations"], report
+assert any(v["effective_ip"] != "127.0.0.1" for v in report["violations"]), report
+print("caught missing !override")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "caught missing !override" ]
 }
 
 @test "compose override port test fails if a newly published upstream port is omitted" {
@@ -295,35 +413,41 @@ doc = yaml.safe_load(open(path))
 doc["services"]["api"]["ports"].append("3999:3999")
 yaml.safe_dump(doc, open(path, "w"))
 PY
-  run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" "${WORKDIR}/installer/docker-compose.yml" <<'PY'
-import pathlib, subprocess, sys, yaml
+  run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" "${WORKDIR}/installer/docker-compose.yml" "${MERGE_PY}" <<'PY'
+import json, pathlib, subprocess, sys, yaml
 root = pathlib.Path(sys.argv[1])
 tmpdir = pathlib.Path(sys.argv[2])
-upstream = yaml.safe_load(pathlib.Path(sys.argv[3]).read_text())
-merged = {}
+upstream_path = pathlib.Path(sys.argv[3])
+merge_py = pathlib.Path(sys.argv[4])
+merged_vars = {}
 for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
-    merged.update(yaml.safe_load(path.read_text()) or {})
+    merged_vars.update(yaml.safe_load(path.read_text()) or {})
 for role in (
     "preflight", "common", "host_firewall", "docker", "e2b_host",
     "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
 ):
     defaults = root / f"ansible/roles/{role}/defaults/main.yml"
     if defaults.is_file():
-        merged.update(yaml.safe_load(defaults.read_text()) or {})
+        merged_vars.update(yaml.safe_load(defaults.read_text()) or {})
 vars_file = tmpdir / "kodus-vars2.yml"
-vars_file.write_text(yaml.safe_dump(merged))
+vars_file.write_text(yaml.safe_dump(merged_vars))
 override_text = subprocess.check_output(
     ["bash", str(root / "tests/fixtures/render-template.sh"),
      "ansible/roles/kodus/templates/docker-compose.override.yml.j2", str(vars_file)],
     text=True, cwd=root,
 )
-override = yaml.safe_load(override_text)
-up = upstream["services"]["api"]["ports"]
-ov = override["services"]["api"]["ports"]
-if len(ov) < len(up):
+override_path = tmpdir / "override2.yml"
+override_path.write_text(override_text)
+proc = subprocess.run(
+    ["python3", str(merge_py), "check", "--base", str(upstream_path),
+     "--override", str(override_path), "--require-ip", "127.0.0.1"],
+    text=True, cwd=root, capture_output=True,
+)
+report = json.loads(proc.stdout)
+if proc.returncode != 0 and "api:3999" in report.get("missing_upstream_targets", []):
     print("caught missing port")
     raise SystemExit(0)
-print("did not catch extra upstream port")
+print("did not catch extra upstream port", report)
 raise SystemExit(1)
 PY
   [ "$status" -eq 0 ]
@@ -399,3 +523,221 @@ EOF
   [[ "${hook}" == https://kodus-webhooks.example.com/* ]]
   [[ "${hook}" != *"${host_api}"* ]]
 }
+
+mismatch_output() {
+  local host="$1"
+  cat <<EOF
+ERROR API_GITHUB_CODE_MANAGEMENT_WEBHOOK (GitHub) host must match WEB_HOSTNAME_API (${host}).
+ERROR API_GITLAB_CODE_MANAGEMENT_WEBHOOK (GitLab) host must match WEB_HOSTNAME_API (${host}).
+ERROR GLOBAL_BITBUCKET_CODE_MANAGEMENT_WEBHOOK (Bitbucket) host must match WEB_HOSTNAME_API (${host}).
+ERROR GLOBAL_AZURE_REPOS_CODE_MANAGEMENT_WEBHOOK (Azure Repos) host must match WEB_HOSTNAME_API (${host}).
+ERROR API_FORGEJO_CODE_MANAGEMENT_WEBHOOK (Forgejo) host must match WEB_HOSTNAME_API (${host}).
+EOF
+}
+
+@test "upstream doctor.sh mismatch-only diagnostics are tolerated" {
+  mismatch_output kodus-api.example.com >"${WORKDIR}/doctor.out"
+  run python3 "${INTERPRET_PY}" --output-file "${WORKDIR}/doctor.out" --rc 1 \
+    --expected-host kodus-api.example.com
+  [ "$status" -eq 0 ]
+}
+
+@test "a genuine doctor.sh error alone fails closed" {
+  printf 'ERROR Docker is not installed.\n' >"${WORKDIR}/doctor.out"
+  run python3 "${INTERPRET_PY}" --output-file "${WORKDIR}/doctor.out" --rc 1 \
+    --expected-host kodus-api.example.com
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unexpected"* ]]
+}
+
+@test "a genuine doctor.sh error alongside mismatches fails closed" {
+  {
+    mismatch_output kodus-api.example.com
+    echo "ERROR Postgres is not accepting connections."
+  } >"${WORKDIR}/doctor.out"
+  run python3 "${INTERPRET_PY}" --output-file "${WORKDIR}/doctor.out" --rc 1 \
+    --expected-host kodus-api.example.com
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Postgres"* ]]
+}
+
+@test "changed upstream doctor.sh wording fails closed" {
+  mismatch_output kodus-api.example.com | sed 's/must match/must equal/' >"${WORKDIR}/doctor.out"
+  run python3 "${INTERPRET_PY}" --output-file "${WORKDIR}/doctor.out" --rc 1 \
+    --expected-host kodus-api.example.com
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"failed closed"* ]]
+}
+
+@test "invalid webhook host or path fails our validation" {
+  render_env
+  python3 - "${WORKDIR}/installer/.env" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+text = text.replace(
+    "https://kodus-webhooks.example.com/github/webhook",
+    "http://kodus-api.example.com/github/webhook",
+)
+path.write_text(text)
+PY
+  run python3 "${VALIDATE_PY}" --env "${WORKDIR}/installer/.env" --webhooks-host kodus-webhooks.example.com
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"https"* ]]
+  render_env
+  python3 - "${WORKDIR}/installer/.env" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+text = text.replace("/gitlab/webhook", "/gitlab/hooks")
+path.write_text(text)
+PY
+  run python3 "${VALIDATE_PY}" --env "${WORKDIR}/installer/.env" --webhooks-host kodus-webhooks.example.com
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"path"* ]]
+}
+
+@test "fixture pin equals versions.yml kodus_installer_ref and includes doctor.sh" {
+  [ -f "${FIXTURE}/scripts/doctor.sh" ]
+  python3 - "${REPO_ROOT}" "${FIXTURE}" <<'PY'
+import pathlib, sys, yaml
+root, fixture = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+versions = yaml.safe_load((root / "versions.yml").read_text())
+pin = yaml.safe_load((fixture / "PIN.yml").read_text())
+assert pin["kodus_installer_ref"] == versions["kodus_installer_ref"], (pin, versions["kodus_installer_ref"])
+assert (fixture / "README.md").is_file()
+print("ok")
+PY
+}
+
+@test "hairpin fallback sets SDK E2B_API_URL and E2B_SANDBOX_URL" {
+  render_env
+  [ "$(dotenv_get "${WORKDIR}/installer/.env" E2B_API_URL)" = "https://api.e2b.example.com" ]
+  [ "$(dotenv_get "${WORKDIR}/installer/.env" E2B_SANDBOX_URL)" = "https://sandbox.e2b.example.com" ]
+  SDK="${REPO_ROOT}/e2b/templates/node_modules/e2b/dist/index.mjs"
+  cat >"${WORKDIR}/sdk-url.mjs" <<EOF
+import { ConnectionConfig } from 'file://${SDK}';
+const cfg = new ConnectionConfig();
+if (cfg.apiUrl !== "https://api.e2b.example.com") {
+  console.error("apiUrl", cfg.apiUrl);
+  process.exit(1);
+}
+const sandboxUrl = cfg.getSandboxUrl("sbx_test", { sandboxDomain: "e2b.example.com", envdPort: 49983 });
+if (sandboxUrl !== "https://sandbox.e2b.example.com") {
+  console.error("sandboxUrl", sandboxUrl);
+  process.exit(1);
+}
+console.log("ok");
+EOF
+  run env E2B_DOMAIN=e2b.example.com \
+    E2B_API_URL=https://api.e2b.example.com \
+    E2B_SANDBOX_URL=https://sandbox.e2b.example.com \
+    node "${WORKDIR}/sdk-url.mjs"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok"* ]]
+  python3 - "${WORKDIR}/config.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+cfg = json.loads(path.read_text())
+cfg["hairpin_fallback"] = False
+path.write_text(json.dumps(cfg))
+PY
+  python3 "${RENDER_PY}" \
+    --example "${WORKDIR}/installer/.env.example" \
+    --output "${WORKDIR}/installer/.env.nofallback" \
+    --config "${WORKDIR}/config.json"
+  ! grep -q '^E2B_API_URL=' "${WORKDIR}/installer/.env.nofallback"
+  ! grep -q '^E2B_SANDBOX_URL=' "${WORKDIR}/installer/.env.nofallback"
+}
+
+@test "renderer honors alternate domain bind host and webhook host" {
+  python3 - "${WORKDIR}/config.json" "${REPO_ROOT}" <<'PY'
+import json, pathlib, sys, yaml
+out, root = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+versions = yaml.safe_load((root / "versions.yml").read_text())
+cfg = {
+    "qops_domain": "acme.test",
+    "web_host": "kodus.acme.test",
+    "api_host": "kodus-api.acme.test",
+    "webhooks_host": "kodus-webhooks.acme.test",
+    "web_url": "https://kodus.acme.test",
+    "e2b_domain": "e2b.acme.test",
+    "e2b_api_key": "e2b_" + "b" * 40,
+    "image_tag": versions["kodus_image_tag"],
+    "sandbox_provider": "e2b",
+    "template_id": "kodus-sandbox",
+    "template_graph_id": "kodus-sandbox-graph",
+    "worker_role": "code-review",
+    "cloud_mode": False,
+    "telemetry_disabled": True,
+    "license_key": "",
+    "llm_provider_model": "auto",
+    "openai_api_key": "sk-alt",
+    "openai_force_base_url": "https://llm.acme.test/v1",
+    "web_port_api": "8443",
+    "hairpin_fallback": True,
+    "env_overrides": {},
+}
+out.write_text(json.dumps(cfg))
+PY
+  python3 "${RENDER_PY}" \
+    --example "${WORKDIR}/installer/.env.example" \
+    --output "${WORKDIR}/installer/.env.alt" \
+    --config "${WORKDIR}/config.json" \
+    --mode 0600
+  [ "$(dotenv_get "${WORKDIR}/installer/.env.alt" WEB_HOSTNAME_API)" = "kodus-api.acme.test" ]
+  [ "$(dotenv_get "${WORKDIR}/installer/.env.alt" API_GITHUB_CODE_MANAGEMENT_WEBHOOK)" = "https://kodus-webhooks.acme.test/github/webhook" ]
+  [ "$(dotenv_get "${WORKDIR}/installer/.env.alt" E2B_DOMAIN)" = "e2b.acme.test" ]
+  [ "$(dotenv_get "${WORKDIR}/installer/.env.alt" E2B_API_URL)" = "https://api.e2b.acme.test" ]
+  [ "$(dotenv_get "${WORKDIR}/installer/.env.alt" API_OPENAI_FORCE_BASE_URL)" = "https://llm.acme.test/v1" ]
+  [ "$(dotenv_get "${WORKDIR}/installer/.env.alt" WEB_PORT_API)" = "8443" ]
+  run bash "${CALLBACKS_SH}" https://kodus.acme.test https://kodus-webhooks.acme.test \
+    https://kodus-api.acme.test "${WORKDIR}/callbacks-alt.txt"
+  [[ "$output" == *"https://kodus-webhooks.acme.test/github/webhook"* ]]
+}
+
+@test "merged compose honors an alternate bind address" {
+  run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" "${WORKDIR}/installer/docker-compose.yml" "${MERGE_PY}" <<'PY'
+import json, pathlib, subprocess, sys, yaml
+root = pathlib.Path(sys.argv[1])
+tmpdir = pathlib.Path(sys.argv[2])
+upstream_path = pathlib.Path(sys.argv[3])
+merge_py = pathlib.Path(sys.argv[4])
+merged_vars = {}
+for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+    merged_vars.update(yaml.safe_load(path.read_text()) or {})
+for role in (
+    "preflight", "common", "host_firewall", "docker", "e2b_host",
+    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
+):
+    defaults = root / f"ansible/roles/{role}/defaults/main.yml"
+    if defaults.is_file():
+        merged_vars.update(yaml.safe_load(defaults.read_text()) or {})
+merged_vars["kodus_bind_host"] = "127.0.0.2"
+vars_file = tmpdir / "kodus-alt-bind.yml"
+vars_file.write_text(yaml.safe_dump(merged_vars))
+override_text = subprocess.check_output(
+    ["bash", str(root / "tests/fixtures/render-template.sh"),
+     "ansible/roles/kodus/templates/docker-compose.override.yml.j2", str(vars_file)],
+    text=True, cwd=root,
+)
+assert "127.0.0.2:" in override_text
+assert "0.0.0.0" not in override_text
+override_path = tmpdir / "override-alt.yml"
+override_path.write_text(override_text)
+report = json.loads(subprocess.check_output(
+    ["python3", str(merge_py), "check", "--base", str(upstream_path),
+     "--override", str(override_path), "--require-ip", "127.0.0.2"],
+    text=True, cwd=root,
+))
+assert report["ok"] is True, report
+assert all(p["effective_ip"] == "127.0.0.2" for p in report["ports"]), report["ports"]
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+

@@ -8,6 +8,7 @@ kodus_persist_dir: /etc/qops/kodus
 kodus_generated_secrets_file: "{{ kodus_persist_dir }}/generated-secrets.env"
 kodus_env_render_config: "{{ kodus_persist_dir }}/render-config.json"
 kodus_callback_urls_file: "{{ kodus_persist_dir }}/callback-urls.txt"
+kodus_digest_file: "{{ kodus_persist_dir }}/install.digest"
 
 kodus_bind_host: "127.0.0.1"
 kodus_web_port: 3000

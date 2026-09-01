@@ -62,7 +62,7 @@
     DOCTOR_KODUS_WEB_HEALTH: "{{ doctor_kodus_web_health }}"
     DOCTOR_KODUS_API_HEALTH: "{{ doctor_kodus_api_health }}"
     DOCTOR_KODUS_WEBHOOKS_HEALTH: "{{ doctor_kodus_webhooks_health }}"
-    DOCTOR_WEBHOOK_URL: "{{ doctor_webhook_url }}"
+    DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD: "{{ doctor_webhook_external_probe_cmd }}"
     DOCTOR_MODULES_DIR: "{{ doctor_modules_dir }}"
     DOCTOR_NBD_SYSFS: "{{ doctor_nbd_sysfs }}"
     DOCTOR_MEMINFO: "{{ doctor_meminfo }}"
@@ -73,8 +73,8 @@
     E2B_API_URL: http://127.0.0.1:8080
     E2B_DOMAIN: "e2b.{{ qops_domain }}"
     DOCTOR_E2B_TEMPLATE: kodus-sandbox
-    DOCTOR_HOST_PUBLIC_IP: "{{ ansible_default_ipv4.address | default('') }}"
-    DOCTOR_LAN_IP: "{{ ansible_default_ipv4.address | default('') }}"
+    DOCTOR_HOST_PUBLIC_IP: "{{ doctor_host_public_ip }}"
+    DOCTOR_LAN_IP: "{{ doctor_lan_ip }}"
     DOCTOR_E2B_SDK: >-
       {{ e2b_templates_install_dir | default('/usr/local/lib/qops/e2b-templates')
          }}/node_modules/e2b/dist/index.js

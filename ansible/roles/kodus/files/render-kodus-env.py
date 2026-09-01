@@ -21,6 +21,12 @@ WEBHOOK_PATHS = {
 }
 
 
+def as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
 def parse_dotenv(text: str) -> list[tuple[str | None, str]]:
     rows: list[tuple[str | None, str]] = []
     for raw in text.splitlines(keepends=False):
@@ -81,6 +87,10 @@ def managed_values(cfg: dict) -> dict[str, str]:
         "IMAGE_TAG": cfg["image_tag"],
         "KODUS_TELEMETRY_DISABLED": "true" if cfg.get("telemetry_disabled") else "false",
     }
+    if as_bool(cfg.get("hairpin_fallback")):
+        e2b_domain = values["E2B_DOMAIN"]
+        values["E2B_API_URL"] = cfg.get("e2b_api_url") or f"https://api.{e2b_domain}"
+        values["E2B_SANDBOX_URL"] = cfg.get("e2b_sandbox_url") or f"https://sandbox.{e2b_domain}"
     openai_key = cfg.get("openai_api_key") or ""
     if openai_key:
         values["API_OPEN_AI_API_KEY"] = openai_key
