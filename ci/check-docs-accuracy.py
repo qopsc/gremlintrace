@@ -34,34 +34,53 @@ PLAYBOOK_NAME_RE = re.compile(
 )
 
 UNCHECKED_GATE_RE = re.compile(r"^- \[ \]", re.M)
+UNCHECKED_GATE_LINE_RE = re.compile(r"^- \[ \].*$\n?", re.M)
 UBUNTU_SUPPORTED_RE = re.compile(
     r"Ubuntu\s+24\.04.{0,240}Supported|Supported.{0,240}Ubuntu\s+24\.04",
     re.I | re.S,
 )
-PHASE0_PASSED_RE = re.compile(
-    r"Phase 0.{0,120}(passed|complete|done)|Phase 0 complete",
-    re.I | re.S,
+# Single-line claim. Does not match the sign-off header "Phase 0 complete?".
+PHASE0_CLAIM_RE = re.compile(
+    r"Phase 0(?:[ \t]+\w+){0,6}[ \t]+(?:passed|complete|done)\b(?!\?)",
+    re.I,
 )
 
 
-def collect_docs(inject_bad: str | None, inject_phase0: bool) -> list[Path]:
-    docs = [p for p in DOC_PATHS if p.is_file()]
-    target = REPO_ROOT / "docs" / ".docs-accuracy-inject.md"
+def docs_to_check(
+    inject_bad: str | None = None,
+    inject_no_checkboxes: bool = False,
+    inject_phase0_spike: bool = False,
+    inject_ubuntu_supported: bool = False,
+) -> list[tuple[Path, str]]:
+    """Return (path, text) pairs. Injects overlay in memory; disk is unchanged."""
+    overlays: dict[Path, str] = {}
+    spike = REPO_ROOT / "docs" / "spike-notes.md"
+    ubuntu = REPO_ROOT / "docs" / "distro-notes" / "ubuntu-24.04.md"
+    if inject_no_checkboxes:
+        overlays[spike] = UNCHECKED_GATE_LINE_RE.sub("", spike.read_text(encoding="utf-8"))
+    if inject_phase0_spike:
+        overlays[spike] = spike.read_text(encoding="utf-8") + (
+            "\n\nPhase 0 complete. Phase 0 passed on nested virt.\n"
+        )
+    if inject_ubuntu_supported:
+        overlays[ubuntu] = ubuntu.read_text(encoding="utf-8") + (
+            "\n\nUbuntu 24.04 is Supported as a production distro.\n"
+        )
+
+    rows: list[tuple[Path, str]] = []
+    for path in DOC_PATHS:
+        if path in overlays:
+            rows.append((path, overlays[path]))
+        elif path.is_file():
+            rows.append((path, path.read_text(encoding="utf-8")))
     if inject_bad:
-        target.write_text(
-            f"# inject\n\nSee ansible/playbooks/{inject_bad}.yml for details.\n",
-            encoding="utf-8",
+        rows.append(
+            (
+                REPO_ROOT / "docs" / ".docs-accuracy-inject.md",
+                f"# inject\n\nSee ansible/playbooks/{inject_bad}.yml for details.\n",
+            )
         )
-        docs.append(target)
-    elif inject_phase0:
-        target.write_text(
-            "# inject\n\n"
-            "Phase 0 complete. Phase 0 has passed on nested virt.\n"
-            "Ubuntu 24.04 is Supported as a production distro.\n",
-            encoding="utf-8",
-        )
-        docs.append(target)
-    return docs
+    return rows
 
 
 def qops_script_sources() -> set[str]:
@@ -81,26 +100,24 @@ def check_honesty(doc: Path, text: str) -> list[str]:
                 f"{rel}: spike-notes.md must still contain unchecked Phase 0 "
                 "gates as `- [ ]` items"
             )
-    if UBUNTU_SUPPORTED_RE.search(text):
+    for match in UBUNTU_SUPPORTED_RE.finditer(text):
+        if "unverified" in match.group(0).lower():
+            continue
         errors.append(
             f"{rel}: docs must not call Ubuntu 24.04 'Supported' "
             "(implemented target, unverified)"
         )
-    if PHASE0_PASSED_RE.search(text) and "not been executed" not in text.lower():
+        break
+    if PHASE0_CLAIM_RE.search(text):
         errors.append(f"{rel}: docs must not claim Phase 0 passed or complete")
-    if inject_claim(text):
-        errors.append(f"{rel}: fabricated Phase 0 complete / Ubuntu Supported claim")
     return errors
-
-
-def inject_claim(text: str) -> bool:
-    lower = text.lower()
-    return "phase 0 complete" in lower and "ubuntu 24.04 is supported" in lower
 
 
 def check_docs(
     inject_bad: str | None = None,
-    inject_phase0: bool = False,
+    inject_no_checkboxes: bool = False,
+    inject_phase0_spike: bool = False,
+    inject_ubuntu_supported: bool = False,
 ) -> list[str]:
     errors: list[str] = []
     playbooks_dir = REPO_ROOT / "ansible" / "playbooks"
@@ -109,8 +126,12 @@ def check_docs(
     ci_matrix_dir = REPO_ROOT / "ci" / "matrix"
     qops_files = qops_script_sources()
 
-    for doc in collect_docs(inject_bad, inject_phase0):
-        text = doc.read_text(encoding="utf-8")
+    for doc, text in docs_to_check(
+        inject_bad=inject_bad,
+        inject_no_checkboxes=inject_no_checkboxes,
+        inject_phase0_spike=inject_phase0_spike,
+        inject_ubuntu_supported=inject_ubuntu_supported,
+    ):
         rel = doc.relative_to(REPO_ROOT)
 
         errors.extend(check_honesty(doc, text))
@@ -157,7 +178,7 @@ def check_docs(
                 errors.append(f"{rel}: no role file for /usr/local/lib/qops/{script}")
 
     inject_path = REPO_ROOT / "docs" / ".docs-accuracy-inject.md"
-    if inject_path.is_file() and inject_bad is None and not inject_phase0:
+    if inject_path.is_file():
         inject_path.unlink()
 
     return errors
@@ -165,25 +186,35 @@ def check_docs(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    inj = parser.add_mutually_exclusive_group()
+    inj.add_argument(
         "--inject-bad-playbook",
         metavar="NAME",
         help="Append a doc referencing a non-existent playbook (test hook).",
     )
-    parser.add_argument(
-        "--inject-phase-0-complete",
+    inj.add_argument(
+        "--inject-spike-notes-no-checkboxes",
         action="store_true",
-        help="Append a doc claiming Phase 0 passed and Ubuntu 24.04 is Supported.",
+        help="Check spike-notes.md with every `- [ ]` line removed (test hook).",
+    )
+    inj.add_argument(
+        "--inject-spike-notes-phase-0-complete",
+        action="store_true",
+        help="Check spike-notes.md claiming Phase 0 complete/passed (test hook).",
+    )
+    inj.add_argument(
+        "--inject-ubuntu-supported",
+        action="store_true",
+        help="Check ubuntu-24.04.md calling the distro Supported (test hook).",
     )
     args = parser.parse_args()
 
     errors = check_docs(
         inject_bad=args.inject_bad_playbook,
-        inject_phase0=args.inject_phase_0_complete,
+        inject_no_checkboxes=args.inject_spike_notes_no_checkboxes,
+        inject_phase0_spike=args.inject_spike_notes_phase_0_complete,
+        inject_ubuntu_supported=args.inject_ubuntu_supported,
     )
-    inject_path = REPO_ROOT / "docs" / ".docs-accuracy-inject.md"
-    if inject_path.is_file():
-        inject_path.unlink()
 
     if errors:
         print("\n".join(errors), file=sys.stderr)

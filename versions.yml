@@ -41,7 +41,7 @@ kodus_image_tag: "2.1.31"
 
 # Edge ------------------------------------------------------------------------
 
-# Traefik static binary installed under systemd (only service binding 0.0.0.0:80/443).
+# Traefik static binary under systemd; the only listener whose 80/443 are network-reachable.
 traefik_version: "v3.3.4"
 
 # Toolchain -------------------------------------------------------------------
