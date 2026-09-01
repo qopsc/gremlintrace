@@ -9,7 +9,8 @@ qops_domain: "example.com"
 tls_mode: "acme_dns"
 
 # ACME DNS-01 provider name for lego (required when tls_mode=acme_dns).
-# Credentials: set via vault or /etc/qops/secrets.env / /etc/qops/traefik-acme.env.
+# Credentials: DNS-01 keys belong in /etc/qops/traefik-acme.env (or a vault
+# that lands there). Traefik must not EnvironmentFile /etc/qops/secrets.env.
 tls_acme_dns_provider: ""
 
 # ACME account email. Empty falls back to e2b_admin_email.

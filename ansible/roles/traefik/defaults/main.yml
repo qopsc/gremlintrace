@@ -41,6 +41,16 @@ traefik_kodus_network: kodus
 traefik_hairpin_host: "api.e2b.{{ qops_domain }}"
 traefik_hairpin_url: "https://{{ traefik_hairpin_host }}/health"
 traefik_hairpin_image: "{{ e2b_clickhouse_image }}:{{ e2b_clickhouse_tag }}"
+# Required only when imported after kodus / from doctor. The traefik role
+# itself leaves this false so first install can skip a missing network.
+traefik_hairpin_required: false
+traefik_hairpin_retries: 30
+traefik_hairpin_delay_seconds: 2
+traefik_idle_conn_timeout_max: 610s
+traefik_api_min_request_body_bytes: 16777216
+traefik_provided_tls_dir: "{{ traefik_state_dir }}/tls"
+traefik_provided_cert_dest: "{{ traefik_provided_tls_dir }}/tls.crt"
+traefik_provided_key_dest: "{{ traefik_provided_tls_dir }}/tls.key"
 traefik_acme_email: "{{ tls_acme_email | default(e2b_admin_email, true) }}"
 traefik_cert_resolver: letsencrypt
 traefik_archive_name: "traefik_{{ traefik_version }}_linux_amd64.tar.gz"

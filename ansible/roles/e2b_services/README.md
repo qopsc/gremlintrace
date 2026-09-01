@@ -14,9 +14,25 @@ orchestrator / api / client-proxy under systemd.
 | `/etc/qops/e2b/api.env` | API env (mode `0600`) |
 | `/etc/qops/e2b/client-proxy.env` | client-proxy env (mode `0600`) |
 | `/etc/qops/e2b/node-id` | Persisted `NODE_ID` (created once) |
+| `/etc/qops/e2b/seeded-api-key` | Root-only durable copy of the team API key |
 
 Env files carry database passwords and `SANDBOX_ACCESS_TOKEN_HASH_SEED`. Tasks that
 read or render them use `no_log`.
+
+## Bind addresses (host firewall, not an E2B patch)
+
+The upstream Go binaries bind all interfaces by design:
+
+| Process | Ports |
+|---|---|
+| orchestrator | 5007 (proxy), 5008 (health) |
+| api | 8080 (HTTP), 5009 (gRPC) |
+| client-proxy | 3002 (edge), 3003 (health) |
+
+That is contained by the host nftables input chain (`policy drop`: loopback,
+established, 22/80/443, and the veth redirect targets only). There is no
+`e2b/patches/` bind-address change. Each systemd unit comments the same
+policy next to the service definition.
 
 ## Units
 
@@ -32,9 +48,19 @@ processes in `/sys/fs/cgroup/e2b/sbx-*` are not drained for up to 35 minutes.
 
 ## Seed and limits
 
-`bin/e2b-seed` runs only when `SELECT 1 FROM teams WHERE email=$1` is empty. There is
-no file marker. The printed `Team API Key` is written to `E2B_API_KEY` in
-`/etc/qops/secrets.env`.
+`bin/e2b-seed` runs only when `SELECT 1 FROM teams WHERE email=$1` is **empty**.
+The gate query accepts that empty result or exactly `1` (already seeded). Any
+other result — including a connection error — **fails closed**. There is no
+file marker. The seeder deletes that team's envs/snapshots on re-run, so a
+malformed query must never fall through to seeding.
+
+The printed `Team API Key` is written to a root-only durable file
+(`/etc/qops/e2b/seeded-api-key`, mode `0600`) the moment it is parsed, then
+copied into `E2B_API_KEY` in `/etc/qops/secrets.env` via an atomic temp+rename
+write. Seeding is complete only after the key is verified present in
+`secrets.env`. If the team row already exists, the durable file is used to
+recover `secrets.env`; if the plaintext key is nowhere, the run fails (the
+Postgres copy is hashed and unrecoverable).
 
 Then, idempotently:
 
@@ -48,7 +74,8 @@ ClickHouse TTL is applied after goose via
 
 ## Health
 
-Waits for `http://127.0.0.1:5008/health`, `http://127.0.0.1:8080/health` (retries
-HTTP 503 until a node is discovered), and TCP `:3003`.
+Waits for `http://127.0.0.1:5008/health`, `http://127.0.0.1:8080/health`
+(retries connection failures and HTTP 503 until a node is discovered; any
+other 4xx/5xx fails immediately with the status and body), and TCP `:3003`.
 
 Implemented in **Task 7** (see `../../../docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md`, Phase 2).

@@ -32,13 +32,15 @@ SELECT COALESCE((
 addon_state="$(printf '%s' "${addon_state}" | tr -d '[:space:]')"
 
 wanted="${EXTRA_SANDBOXES}:${EXTRA_BUILDS}"
+# Redirect psql command tags (INSERT 0 1 / UPDATE 1) so the only stdout
+# token is the final changed/unchanged state.
 if [[ -z "${addon_state}" ]]; then
   "$@" "${psql_vars[@]}" -c "\
 INSERT INTO addons (team_id, name, extra_concurrent_sandboxes, extra_concurrent_template_builds, added_by)
 SELECT t.id, :'addon_name', ${EXTRA_SANDBOXES}::bigint, ${EXTRA_BUILDS}::bigint, u.id
 FROM teams t
 JOIN auth.users u ON u.email = t.email
-WHERE t.email = :'email'"
+WHERE t.email = :'email'" >/dev/null
   changed=1
 elif [[ "${addon_state}" != "${wanted}" ]]; then
   "$@" "${psql_vars[@]}" -c "\
@@ -46,7 +48,7 @@ UPDATE addons a
 SET extra_concurrent_sandboxes = ${EXTRA_SANDBOXES}::bigint,
     extra_concurrent_template_builds = ${EXTRA_BUILDS}::bigint
 FROM teams t
-WHERE a.team_id = t.id AND t.email = :'email' AND a.name = :'addon_name'"
+WHERE a.team_id = t.id AND t.email = :'email' AND a.name = :'addon_name'" >/dev/null
   changed=1
 fi
 

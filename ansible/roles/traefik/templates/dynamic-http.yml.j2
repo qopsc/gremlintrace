@@ -7,8 +7,6 @@ http:
         - websecure
       priority: {{ traefik_e2b_api_priority }}
       service: e2b-api
-      middlewares:
-        - e2b-api-bodylimit
       tls:
 {% if tls_mode == "acme_dns" %}
         certResolver: {{ traefik_cert_resolver }}
@@ -70,10 +68,10 @@ http:
             sans:
               - "*.{{ qops_domain }}"
 {% endif %}
-  middlewares:
-    e2b-api-bodylimit:
-      buffering:
-        maxRequestBodyBytes: {{ traefik_api_max_request_body_bytes }}
+  # No buffering middleware. Traefik streams request/response bodies; that is
+  # required for long-running commands.run. Without a body-limit middleware
+  # the api.e2b router admits bodies of any size
+  # (>= {{ traefik_api_max_request_body_bytes }} bytes, asserted at render time).
   services:
     e2b-api:
       loadBalancer:

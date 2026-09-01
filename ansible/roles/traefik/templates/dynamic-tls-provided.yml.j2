@@ -1,5 +1,5 @@
 ---
 tls:
   certificates:
-    - certFile: {{ tls_cert_path }}
-      keyFile: {{ tls_key_path }}
+    - certFile: {{ traefik_provided_cert_dest }}
+      keyFile: {{ traefik_provided_key_dest }}
