@@ -1,0 +1,9 @@
+---
+# Localhost inventory for the installer-matrix ubuntu-24.04 leg.
+all:
+  children:
+    codereviewer:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_become: true

@@ -1,3 +1,31 @@
 ---
 backup_script_path: /usr/local/bin/qops-backup
+backup_verify_script_path: /usr/local/bin/qops-backup-verify
 backup_e2b_gc_script_path: /usr/local/bin/qops-e2b-gc
+backup_uninstall_script_path: /usr/local/bin/qops-uninstall
+backup_lib_dir: /usr/local/lib/qops
+
+backup_root: "{{ common_qops_backup_dir | default('/var/backups/qops') }}"
+backup_retention_days: 7
+backup_timer_on_calendar: "*-*-* 02:00:00"
+backup_gc_timer_on_calendar: "*-*-* 03:30:00"
+
+backup_secrets_file: "{{ common_qops_secrets_file | default('/etc/qops/secrets.env') }}"
+backup_qops_dir: "{{ common_qops_config_dir | default('/etc/qops') }}"
+backup_kodus_install_dir: "{{ kodus_install_dir | default('/opt/kodus-installer') }}"
+backup_kodus_env_file: "{{ kodus_env_file | default('/opt/kodus-installer/.env') }}"
+backup_e2b_compose_file: "{{ e2b_datastores_compose_file | default('/etc/qops/e2b-data/docker-compose.yml') }}"
+backup_e2b_compose_project: "{{ e2b_datastores_compose_project | default('e2b-data') }}"
+backup_e2b_postgres_user: "{{ e2b_datastores_postgres_user | default('postgres') }}"
+backup_e2b_postgres_db: "{{ e2b_datastores_postgres_db | default('e2b') }}"
+
+backup_gc_store: "{{ e2b_services_template_storage_path | default('/var/lib/e2b/storage') }}"
+backup_gc_summary_path: "{{ e2b_templates_summary_path | default('/var/lib/e2b/templates-last-summary.json') }}"
+backup_gc_retention_hours: "{{ e2b_snapshot_retention_hours | default(168) }}"
+
+backup_unit: qops-backup.service
+backup_timer_unit: qops-backup.timer
+backup_gc_unit: qops-e2b-gc.service
+backup_gc_timer_unit: qops-e2b-gc.timer
+backup_env_file: /etc/qops/backup.env
+backup_gc_env_file: /etc/qops/e2b-gc.env

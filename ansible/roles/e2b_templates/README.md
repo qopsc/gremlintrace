@@ -24,7 +24,10 @@ the role runs a one-shot `node:<node_ci_version>` container (`--network host`)
 so `http://127.0.0.1:8080` still works. The image tag is never `latest`.
 
 `site.yml` re-runs leave `E2B_TEMPLATE_FORCE` unset so existing aliases are
-`skipped`. The play fails if the JSON summary contains any `action: failed`.
+`skipped`. `upgrade.yml` sets `e2b_templates_force=true` **only when**
+`envd_version` (BUILD_INFO), `firecracker_version`, or `kernel_version` changed
+relative to the installed cluster. The play fails if the JSON summary contains
+any `action: failed`.
 
 The controller copies `e2b/templates` onto the managed host first
 (`ansible.builtin.copy` from `e2b_templates_controller_src_dir` to

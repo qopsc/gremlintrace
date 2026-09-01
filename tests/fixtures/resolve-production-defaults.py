@@ -23,6 +23,7 @@ ROLES = (
     "e2b_templates",
     "traefik",
     "kodus",
+    "backup",
     "doctor",
 )
 
@@ -59,6 +60,7 @@ IGNORED_NAMES = frozenset(
         "query",
         "env",
         "from_json",
+        "public",
         "to_nice_json",
         "to_json",
         "b64decode",

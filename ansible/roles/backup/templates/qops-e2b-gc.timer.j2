@@ -1,0 +1,10 @@
+[Unit]
+Description=Run qops-e2b-gc on a calendar schedule
+
+[Timer]
+OnCalendar={{ backup_gc_timer_on_calendar }}
+Persistent=true
+Unit={{ backup_gc_unit }}
+
+[Install]
+WantedBy=timers.target

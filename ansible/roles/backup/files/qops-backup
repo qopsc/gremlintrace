@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# M1 backup: both Postgres instances, mongodump, RabbitMQ definitions, /etc/qops.
+# Does not back up the template store, S3/NFS, or ClickHouse (M2).
+set -euo pipefail
+
+ROOT="${QOPS_BACKUP_ROOT:-/var/backups/qops}"
+RETENTION_DAYS="${QOPS_BACKUP_RETENTION_DAYS:-7}"
+DOCKER_BIN="${QOPS_BACKUP_DOCKER:-docker}"
+SECRETS="${QOPS_BACKUP_SECRETS:-/etc/qops/secrets.env}"
+QOPS_DIR="${QOPS_BACKUP_QOPS_DIR:-/etc/qops}"
+KODUS_DIR="${QOPS_BACKUP_KODUS_DIR:-/opt/kodus-installer}"
+KODUS_ENV="${QOPS_BACKUP_KODUS_ENV:-${KODUS_DIR}/.env}"
+KODUS_COMPOSE="${QOPS_BACKUP_KODUS_COMPOSE:-${KODUS_DIR}/docker-compose.yml}"
+KODUS_OVERRIDE="${QOPS_BACKUP_KODUS_OVERRIDE:-${KODUS_DIR}/docker-compose.override.yml}"
+E2B_COMPOSE="${QOPS_BACKUP_E2B_COMPOSE:-/etc/qops/e2b-data/docker-compose.yml}"
+E2B_PROJECT="${QOPS_BACKUP_E2B_PROJECT:-e2b-data}"
+E2B_PG_USER="${QOPS_BACKUP_E2B_PG_USER:-postgres}"
+E2B_PG_DB="${QOPS_BACKUP_E2B_PG_DB:-e2b}"
+VERIFY_BIN="${QOPS_BACKUP_VERIFY:-/usr/local/bin/qops-backup-verify}"
+STAMP="${QOPS_BACKUP_STAMP:-$(date -u +%Y-%m-%dT%H%M%SZ)}"
+
+read_dotenv() {
+  local file="$1"
+  local key="$2"
+  python3 - "${file}" "${key}" <<'PY'
+import os
+import sys
+
+path, key = sys.argv[1], sys.argv[2]
+if not os.path.isfile(path):
+    raise SystemExit(f"missing {path}")
+value = None
+with open(path, encoding="utf-8") as handle:
+    for raw in handle:
+        line = raw.rstrip("\n")
+        if not line or line.lstrip().startswith("#"):
+            continue
+        if line.startswith(key + "="):
+            value = line.split("=", 1)[1]
+if value is None:
+    raise SystemExit(f"missing key {key} in {path}")
+sys.stdout.write(value)
+PY
+}
+
+compose_kodus() {
+  local -a files
+  files=(-f "${KODUS_COMPOSE}")
+  if [[ -f "${KODUS_OVERRIDE}" ]]; then
+    files+=(-f "${KODUS_OVERRIDE}")
+  fi
+  "${DOCKER_BIN}" compose --project-directory "${KODUS_DIR}" "${files[@]}" \
+    --env-file "${KODUS_ENV}" "$@"
+}
+
+compose_e2b() {
+  "${DOCKER_BIN}" compose --project-name "${E2B_PROJECT}" \
+    --env-file "${SECRETS}" -f "${E2B_COMPOSE}" "$@"
+}
+
+if [[ ! -x "${DOCKER_BIN}" ]] && ! command -v "${DOCKER_BIN}" >/dev/null 2>&1; then
+  echo "docker not found: ${DOCKER_BIN}" >&2
+  exit 1
+fi
+
+mkdir -p "${ROOT}"
+chmod 0750 "${ROOT}"
+DEST="${ROOT}/${STAMP}"
+mkdir -p "${DEST}"
+chmod 0750 "${DEST}"
+
+PG_USER="$(read_dotenv "${KODUS_ENV}" API_PG_DB_USERNAME)"
+PG_DB="$(read_dotenv "${KODUS_ENV}" API_PG_DB_DATABASE)"
+MG_USER="$(read_dotenv "${KODUS_ENV}" API_MG_DB_USERNAME)"
+MG_PASS="$(read_dotenv "${KODUS_ENV}" API_MG_DB_PASSWORD)"
+MG_DB="$(read_dotenv "${KODUS_ENV}" API_MG_DB_DATABASE)"
+
+compose_kodus exec -T db_kodus_postgres \
+  pg_dump -U "${PG_USER}" --format=plain --no-owner --no-acl "${PG_DB}" \
+  | gzip -c >"${DEST}/kodus-postgres.sql.gz"
+
+compose_e2b exec -T postgres \
+  pg_dump -U "${E2B_PG_USER}" --format=plain --no-owner --no-acl "${E2B_PG_DB}" \
+  | gzip -c >"${DEST}/e2b-postgres.sql.gz"
+
+compose_kodus exec -T db_kodus_mongodb \
+  mongodump --archive --gzip \
+  -u "${MG_USER}" -p "${MG_PASS}" --authenticationDatabase admin \
+  --db "${MG_DB}" >"${DEST}/mongo.archive.gz"
+
+tmp_defs="$(mktemp)"
+chmod 0600 "${tmp_defs}"
+compose_kodus exec -T rabbitmq \
+  rabbitmqctl export_definitions /tmp/qops-rabbitmq-definitions.json >/dev/null
+compose_kodus exec -T rabbitmq \
+  cat /tmp/qops-rabbitmq-definitions.json >"${tmp_defs}"
+python3 - "${tmp_defs}" "${DEST}/rabbitmq-definitions.json" <<'PY'
+import json
+import pathlib
+import sys
+
+src, dest = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+json.loads(src.read_text(encoding="utf-8"))
+dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+PY
+rm -f "${tmp_defs}"
+
+tar -C "$(dirname "${QOPS_DIR}")" -czf "${DEST}/etc-qops.tar.gz" "$(basename "${QOPS_DIR}")"
+
+python3 - "${DEST}" "${STAMP}" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+dest = pathlib.Path(sys.argv[1])
+stamp = sys.argv[2]
+names = [
+    "kodus-postgres.sql.gz",
+    "e2b-postgres.sql.gz",
+    "mongo.archive.gz",
+    "rabbitmq-definitions.json",
+    "etc-qops.tar.gz",
+]
+lines = []
+for name in names:
+    path = dest / name
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    lines.append(f"{digest}  {name}")
+(dest / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+manifest = {
+    "created_at": stamp,
+    "version": 1,
+    "milestone": "M1",
+    "files": names + ["SHA256SUMS", "MANIFEST.json"],
+    "components": [
+        "kodus-postgres",
+        "e2b-postgres",
+        "mongo",
+        "rabbitmq-definitions",
+        "etc-qops",
+    ],
+}
+(dest / "MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+
+if [[ ! -x "${VERIFY_BIN}" ]] && ! command -v "${VERIFY_BIN}" >/dev/null 2>&1; then
+  echo "qops-backup-verify missing: ${VERIFY_BIN}" >&2
+  exit 1
+fi
+"${VERIFY_BIN}" "${DEST}"
+
+ln -sfn "${DEST}" "${ROOT}/latest"
+
+if [[ "${RETENTION_DAYS}" =~ ^[0-9]+$ ]] && [[ "${RETENTION_DAYS}" -gt 0 ]]; then
+  latest_resolved="$(readlink -f "${ROOT}/latest")"
+  find "${ROOT}" -mindepth 1 -maxdepth 1 -type d -mtime "+${RETENTION_DAYS}" \
+    ! -path "${latest_resolved}" -exec rm -rf {} +
+fi
+
+echo "ok ${DEST}"

@@ -1,0 +1,27 @@
+---
+# CI-only overrides for the ubuntu-24.04 installer-matrix leg on GitHub-hosted runners.
+# Production installs must not copy these relaxed preflight thresholds.
+
+qops_domain: ci.qops.test
+
+tls_mode: provided
+tls_cert_path: /etc/qops/ci-tls/tls.crt
+tls_key_path: /etc/qops/ci-tls/tls.key
+
+# GitHub-hosted standard runners are smaller than the production minimum.
+preflight_min_vcpus: 2
+preflight_min_ram_mb: 7000
+preflight_min_disk_gb: 30
+
+# qops_public_ipv4 / qops_lan_ipv4 are set at runtime from /etc/qops/ci-matrix.env
+# (prepare-host.sh discovers the runner address and a RFC1918 LAN probe target).
+
+# Dist and FC artifacts are staged locally by ci/matrix/stage-artifacts.sh.
+qops_release_base_url: ""
+e2b_services_dist_local_path: /var/cache/qops/ci/e2b-dist.tar.gz
+e2b_host_fc_artifacts_local_path: /var/cache/qops/ci/e2b-fc-artifacts.tar.gz
+
+# LLM key is injected via ci/matrix/run-bootstrap.sh from QOPS_CI_LLM_API_KEY (never committed).
+
+# Webhook external probe is not available on the runner itself.
+doctor_webhook_external_probe_cmd: ""
