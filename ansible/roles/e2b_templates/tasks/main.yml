@@ -1,6 +1,89 @@
 ---
-- name: Placeholder for the e2b_templates role
-  ansible.builtin.debug:
-    msg: "e2b_templates role is implemented in task 8"
+- name: Install e2b_templates helper scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/lib/qops/{{ item }}"
+    mode: "0755"
+    owner: root
+    group: root
+  loop:
+    - install-template-sources.sh
+    - ensure-node.sh
+    - run-build-templates.sh
+    - prune-stale-template-images.sh
+  tags:
+    - e2b_templates
+
+- name: Ensure host Node matches versions.yml major
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/ensure-node.sh {{ node_version }} {{ e2b_templates_node_bin }}
+  register: e2b_templates_node
+  changed_when: false
+  failed_when: false
+  tags:
+    - e2b_templates
+
+- name: Select host Node or pinned one-shot container
+  ansible.builtin.set_fact:
+    e2b_templates_node_image_effective: >-
+      {{ '' if e2b_templates_node.rc == 0
+         else (e2b_templates_node_image ~ ':' ~ e2b_templates_node_tag) }}
+  tags:
+    - e2b_templates
+
+- name: Install template sources on the host
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/install-template-sources.sh
+      {{ e2b_templates_src_dir }}
+      {{ e2b_templates_install_dir }}
+  register: e2b_templates_sources
+  changed_when: (e2b_templates_sources.stdout | trim) == "installed"
+  tags:
+    - e2b_templates
+
+- name: Load E2B_API_KEY for template builds
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} E2B_API_KEY
+  register: e2b_templates_api_key
+  changed_when: false
+  no_log: true
+  tags:
+    - e2b_templates
+
+- name: Fail when E2B_API_KEY is empty
+  ansible.builtin.fail:
+    msg: E2B_API_KEY is empty in {{ common_qops_secrets_file }}; e2b_services seed must run first.
+  when: e2b_templates_api_key.stdout | trim | length == 0
+  tags:
+    - e2b_templates
+
+- name: Build E2B templates against the local API
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/run-build-templates.sh
+      {{ e2b_templates_install_dir }}
+      {{ e2b_templates_summary_path }}
+      {{ e2b_templates_npm_bin }}
+      {{ e2b_templates_node_image_effective }}
+  environment:
+    E2B_API_KEY: "{{ e2b_templates_api_key.stdout }}"
+    E2B_API_URL: "{{ e2b_templates_api_url }}"
+    E2B_DOMAIN: "{{ e2b_templates_domain }}"
+    E2B_TEMPLATE_FORCE: "{{ 'true' if (e2b_templates_force | bool) else '' }}"
+    E2B_BASE_IMAGE: "{{ e2b_templates_base_image }}"
+  register: e2b_templates_build
+  changed_when: (e2b_templates_build.stdout | trim) == "changed"
+  no_log: true
+  tags:
+    - e2b_templates
+
+- name: Prune stale Local-registry template images
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/prune-stale-template-images.sh
+      {{ e2b_templates_summary_path }}
+  register: e2b_templates_prune
+  changed_when: (e2b_templates_prune.stdout | trim) == "changed"
   tags:
     - e2b_templates

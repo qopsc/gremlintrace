@@ -9,8 +9,11 @@ qops_domain: "example.com"
 tls_mode: "acme_dns"
 
 # ACME DNS-01 provider name for lego (required when tls_mode=acme_dns).
-# Credentials: set via vault or /etc/qops/secrets.env.
+# Credentials: set via vault or /etc/qops/secrets.env / /etc/qops/traefik-acme.env.
 tls_acme_dns_provider: ""
+
+# ACME account email. Empty falls back to e2b_admin_email.
+tls_acme_email: ""
 
 # Customer-provided certificate paths (required when tls_mode=provided or internal_ca).
 tls_cert_path: ""
@@ -30,6 +33,9 @@ e2b_hugepages_percentage: 80
 
 # Total concurrent sandboxes cap (base_v1 tier is 20; installer adds an addons row for the rest).
 e2b_max_concurrent_sandboxes: 100
+
+# Extra concurrent template builds granted via the addons row (not a tier total).
+e2b_extra_concurrent_template_builds: 10
 
 # Maximum sandbox lifetime in hours (updates tier only when raised above default).
 e2b_max_sandbox_hours: 1

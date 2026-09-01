@@ -1,6 +1,258 @@
 ---
-- name: Placeholder for the traefik role
-  ansible.builtin.debug:
-    msg: "traefik role is implemented in task 8"
+- name: Install traefik helper scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/lib/qops/{{ item }}"
+    mode: "0755"
+    owner: root
+    group: root
+  loop:
+    - check-tls-mode.sh
+    - install-traefik.sh
+    - verify-traefik.sh
+    - hairpin-check.sh
+  tags:
+    - traefik
+
+- name: Reject unsupported TLS modes
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/check-tls-mode.sh {{ tls_mode }}
+  register: traefik_tls_mode
+  changed_when: false
+  tags:
+    - traefik
+
+- name: Require ACME DNS provider when tls_mode is acme_dns
+  ansible.builtin.assert:
+    that:
+      - tls_acme_dns_provider | length > 0
+    fail_msg: tls_mode=acme_dns requires tls_acme_dns_provider
+  when: tls_mode == "acme_dns"
+  tags:
+    - traefik
+
+- name: Require certificate files when tls_mode is provided
+  ansible.builtin.assert:
+    that:
+      - tls_cert_path | length > 0
+      - tls_key_path | length > 0
+    fail_msg: tls_mode=provided requires tls_cert_path and tls_key_path
+  when: tls_mode == "provided"
+  tags:
+    - traefik
+
+- name: Create traefik group
+  ansible.builtin.group:
+    name: "{{ traefik_group }}"
+    system: true
+  tags:
+    - traefik
+
+- name: Create traefik user
+  ansible.builtin.user:
+    name: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ traefik_state_dir }}"
+    create_home: false
+  tags:
+    - traefik
+
+- name: Ensure traefik directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0755"
+  loop:
+    - "{{ traefik_config_dir }}"
+    - "{{ traefik_dynamic_config_dir }}"
+    - "{{ traefik_state_dir }}"
+    - "{{ traefik_cache_dir }}"
+    - "{{ traefik_install_dir }}"
+  tags:
+    - traefik
+
+- name: Resolve Traefik archive path
+  ansible.builtin.set_fact:
+    traefik_archive_path: >-
+      {{ traefik_local_path if (traefik_local_path | length > 0)
+         else (traefik_cache_dir ~ '/' ~ traefik_archive_name) }}
+    traefik_checksums_path: "{{ traefik_cache_dir }}/{{ traefik_checksums_name }}"
+    traefik_archive_url: >-
+      {{ traefik_download_url if (traefik_download_url | length > 0)
+         else (traefik_release_base_url ~ '/' ~ traefik_archive_name) }}
+    traefik_checksums_effective_url: >-
+      {{ traefik_checksums_url if (traefik_checksums_url | length > 0)
+         else (traefik_release_base_url ~ '/' ~ traefik_checksums_name) }}
+  tags:
+    - traefik
+
+- name: Verify installed Traefik binary
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/verify-traefik.sh {{ traefik_binary }} {{ traefik_version }}
+  register: traefik_verify
+  changed_when: false
+  failed_when: false
+  tags:
+    - traefik
+
+- name: Download Traefik checksums
+  ansible.builtin.get_url:
+    url: "{{ traefik_checksums_effective_url }}"
+    dest: "{{ traefik_checksums_path }}"
+    mode: "0644"
+    force: false
+  when:
+    - traefik_verify.rc != 0
+    - traefik_local_path | length == 0
+  tags:
+    - traefik
+
+- name: Download Traefik archive
+  ansible.builtin.get_url:
+    url: "{{ traefik_archive_url }}"
+    dest: "{{ traefik_archive_path }}"
+    mode: "0644"
+    force: false
+  when:
+    - traefik_verify.rc != 0
+    - traefik_local_path | length == 0
+  tags:
+    - traefik
+
+- name: Fail when Traefik archive is missing
+  ansible.builtin.stat:
+    path: "{{ traefik_archive_path }}"
+  register: traefik_archive_stat
+  tags:
+    - traefik
+
+- name: Report missing Traefik archive
+  ansible.builtin.fail:
+    msg: >-
+      Traefik archive not found at {{ traefik_archive_path }}.
+      Provide traefik_local_path or allow download of {{ traefik_archive_name }}
+      from the GitHub release for traefik_version.
+  when:
+    - traefik_verify.rc != 0
+    - not traefik_archive_stat.stat.exists
+  tags:
+    - traefik
+
+- name: Install Traefik binary
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/install-traefik.sh
+      {{ traefik_version }}
+      {{ traefik_binary }}
+      {{ traefik_archive_path }}
+      {{ traefik_checksums_path }}
+  when: traefik_verify.rc != 0
+  register: traefik_install
+  changed_when: traefik_install.rc == 0
+  tags:
+    - traefik
+
+- name: Confirm Traefik binary after install
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/verify-traefik.sh {{ traefik_binary }} {{ traefik_version }}
+  changed_when: false
+  tags:
+    - traefik
+
+- name: Render Traefik static configuration
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: "{{ traefik_static_config }}"
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0644"
+  notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Render Traefik HTTP routers and services
+  ansible.builtin.template:
+    src: dynamic-http.yml.j2
+    dest: "{{ traefik_dynamic_config_dir }}/http.yml"
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0644"
+  notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Render provided TLS certificate file
+  ansible.builtin.template:
+    src: dynamic-tls-provided.yml.j2
+    dest: "{{ traefik_dynamic_config_dir }}/tls-provided.yml"
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0644"
+  when: tls_mode == "provided"
+  notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Remove provided TLS file when using ACME
+  ansible.builtin.file:
+    path: "{{ traefik_dynamic_config_dir }}/tls-provided.yml"
+    state: absent
+  when: tls_mode == "acme_dns"
+  notify: Restart traefik
+  tags:
+    - traefik
+
+- name: Ensure ACME storage file exists
+  ansible.builtin.file:
+    path: "{{ traefik_acme_storage }}"
+    state: touch
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0600"
+    modification_time: preserve
+    access_time: preserve
+  when: tls_mode == "acme_dns"
+  tags:
+    - traefik
+
+- name: Install traefik systemd unit
+  ansible.builtin.template:
+    src: traefik.service.j2
+    dest: "/etc/systemd/system/{{ traefik_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart traefik
+  tags:
+    - traefik
+
+- name: Flush traefik handlers before starting the unit
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - traefik
+
+- name: Enable and start Traefik
+  ansible.builtin.service:
+    name: "{{ traefik_unit }}"
+    enabled: true
+    state: started
+  tags:
+    - traefik
+
+- name: Hairpin-check api.e2b from the Kodus network when it exists
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/hairpin-check.sh
+      {{ traefik_kodus_network }}
+      {{ traefik_hairpin_url }}
+      {{ traefik_hairpin_image }}
+  register: traefik_hairpin
+  changed_when: false
   tags:
     - traefik

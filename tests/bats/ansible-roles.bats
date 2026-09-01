@@ -221,7 +221,7 @@ extra_raw = sys.argv[3]
 merged = {}
 for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
     merged.update(yaml.safe_load(path.read_text()) or {})
-for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores"):
+for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores", "e2b_services", "e2b_templates", "traefik"):
     defaults = root / f"ansible/roles/{role}/defaults/main.yml"
     if defaults.is_file():
         merged.update(yaml.safe_load(defaults.read_text()) or {})
@@ -333,7 +333,7 @@ def render_template(template_rel: str, extra: dict | None = None) -> str:
     import yaml
     for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
         merged.update(yaml.safe_load(path.read_text()) or {})
-    for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores"):
+    for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores", "e2b_services", "e2b_templates", "traefik"):
         defaults = root / f"ansible/roles/{role}/defaults/main.yml"
         if defaults.is_file():
             merged.update(yaml.safe_load(defaults.read_text()) or {})

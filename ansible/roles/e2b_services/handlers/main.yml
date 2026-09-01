@@ -1,0 +1,23 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: Reload systemd
+
+- name: Restart e2b-orchestrator
+  ansible.builtin.service:
+    name: "{{ e2b_services_orchestrator_unit }}"
+    state: restarted
+  listen: Restart e2b-orchestrator
+
+- name: Restart e2b-api
+  ansible.builtin.service:
+    name: "{{ e2b_services_api_unit }}"
+    state: restarted
+  listen: Restart e2b-api
+
+- name: Restart e2b-client-proxy
+  ansible.builtin.service:
+    name: "{{ e2b_services_client_proxy_unit }}"
+    state: restarted
+  listen: Restart e2b-client-proxy

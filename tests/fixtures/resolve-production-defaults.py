@@ -12,7 +12,17 @@ import tempfile
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-ROLES = ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores")
+ROLES = (
+    "preflight",
+    "common",
+    "host_firewall",
+    "docker",
+    "e2b_host",
+    "e2b_datastores",
+    "e2b_services",
+    "e2b_templates",
+    "traefik",
+)
 
 JINJA_BLOCK = re.compile(r"\{\{-?(.+?)-?\}\}|\{%-?(.+?)-?\%\}", re.DOTALL)
 IDENT = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b")
@@ -173,6 +183,8 @@ def collect_set_fact_keys(doc: object, keys: set[str]) -> None:
             fact_block = doc.get("ansible.builtin.set_fact") or doc.get("set_fact")
             if isinstance(fact_block, dict):
                 keys.update(fact_block.keys())
+        if "vars" in doc and isinstance(doc["vars"], dict):
+            keys.update(doc["vars"].keys())
         for value in doc.values():
             collect_set_fact_keys(value, keys)
     elif isinstance(doc, list):
@@ -259,7 +271,7 @@ def render_templates(vars_path: pathlib.Path) -> list[str]:
         template_dir = ROOT / f"ansible/roles/{role}/templates"
         if not template_dir.is_dir():
             continue
-        for template in sorted(template_dir.glob("*.j2")):
+        for template in sorted(template_dir.rglob("*.j2")):
             if template.name == "secrets.env.j2":
                 continue
             dest = tempfile.mktemp()

@@ -1,0 +1,25 @@
+[Unit]
+Description=E2B orchestrator and template-manager
+Requires=docker.service
+Wants=network-online.target
+After=docker.service network-online.target
+RequiresMountsFor={{ e2b_host_orchestrator_root }} {{ e2b_host_hugepages_mount }}
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile={{ e2b_services_orchestrator_env }}
+ExecStart={{ e2b_services_orchestrator_bin }}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+TasksMax=infinity
+OOMScoreAdjust=-900
+TimeoutStopSec=180
+# Firecracker processes live in /sys/fs/cgroup/e2b/sbx-* outside this unit's
+# cgroup, so systemctl stop drains live sandboxes up to the 35-minute ceiling
+# unless FORCE_STOP=true, which upgrade.yml sets.
+
+[Install]
+WantedBy=multi-user.target
