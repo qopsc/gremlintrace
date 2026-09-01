@@ -335,6 +335,8 @@ def main() -> int:
                 continue
             # END_GUARD dry_run
             try:
+                # lock-cmd stdin is still open: INSERT cannot take the same
+                # lock until rmtree returns and the outer finally releases.
                 shutil.rmtree(entry)
             except OSError as exc:
                 log(f"qops-e2b-gc: failed to remove {entry}: {exc}")

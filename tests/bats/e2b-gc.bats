@@ -10,12 +10,25 @@ setup() {
   mkdir -p "${STORE}"
   NOW=1700000000
   LOCK_STUB="${BATS_TMPDIR}/lock.sh"
+  SLOW_GC="${REPO_ROOT}/tests/fixtures/gc-run-slow-rmtree.py"
   cat >"${LOCK_STUB}" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' __QOPS_E2B_GC_LOCK_OK__
 cat >/dev/null
 EOF
   chmod +x "${LOCK_STUB}"
+}
+
+teardown() {
+  rm -f "${BATS_TMPDIR}/rmtree.hold"
+  if [[ -n "${gc_pid:-}" ]] && kill -0 "${gc_pid}" 2>/dev/null; then
+    kill "${gc_pid}" 2>/dev/null || true
+    wait "${gc_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${ins_pid:-}" ]] && kill -0 "${ins_pid}" 2>/dev/null; then
+    kill "${ins_pid}" 2>/dev/null || true
+    wait "${ins_pid}" 2>/dev/null || true
+  fi
 }
 
 disable_guard() {
@@ -58,6 +71,63 @@ run_gc() {
     --summary-path "${BATS_TMPDIR}/missing-summary.json" \
     --lock-cmd "${LOCK_STUB}" \
     "$@"
+}
+
+run_gc_slow_rmtree() {
+  local script="${1:-${GC}}"
+  shift || true
+  python3 "${SLOW_GC}" "${script}" \
+    --store "${STORE}" \
+    --retention-hours 24 \
+    --now-epoch "${NOW}" \
+    --docker-bin /bin/false \
+    --summary-path "${BATS_TMPDIR}/missing-summary.json" \
+    --lock-cmd "${LOCK_STUB}" \
+    "$@"
+}
+
+wait_for_file() {
+  local path="$1"
+  local loops="${2:-200}"
+  local i
+  for ((i = 0; i < loops; i++)); do
+    if [[ -f "${path}" ]]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "timed out waiting for ${path}" >&2
+  return 1
+}
+
+release_lock_before_rmtree() {
+  local dest="$1"
+  python3 - "${GC}" "${dest}" <<'PY'
+import sys
+
+src, dest = sys.argv[1], sys.argv[2]
+text = open(src, encoding="utf-8").read()
+needle = "            try:\n                shutil.rmtree(entry)\n"
+# Keep the comment block if present; match the rmtree call site.
+alt = (
+    "            try:\n"
+    "                # lock-cmd stdin is still open: INSERT cannot take the same\n"
+    "                # lock until rmtree returns and the outer finally releases.\n"
+    "                shutil.rmtree(entry)\n"
+)
+insert = (
+    "            if lock_proc is not None:\n"
+    "                release_lock(lock_proc)\n"
+    "                lock_proc = None\n"
+)
+if text.count(alt) == 1:
+    text = text.replace(alt, insert + alt, 1)
+elif text.count(needle) == 1:
+    text = text.replace(needle, insert + needle, 1)
+else:
+    raise SystemExit("rmtree call site not found or not unique")
+open(dest, "w", encoding="utf-8").write(text)
+PY
 }
 
 @test "referenced build is never deleted" {
@@ -344,28 +414,101 @@ EOF
   [ ! -d "${STORE}/raced" ]
 }
 
-@test "lockfile serializes insert until after query-and-delete" {
+# Property: a concurrent inserter blocked on the same lockfile cannot observe
+# the target directory still present. By the time it acquires the lock, rmtree
+# has finished (directory is gone). If GC releases the lock before rmtree, the
+# inserter succeeds while the directory still exists and this test fails.
+setup_lock_spans_rmtree() {
   make_dir raced $((NOW - 1000000))
   lockfile="${BATS_TMPDIR}/gc.lock"
+  lock_held="${BATS_TMPDIR}/lock.held"
+  rmtree_started="${BATS_TMPDIR}/rmtree.started"
+  rmtree_hold="${BATS_TMPDIR}/rmtree.hold"
+  insert_result="${BATS_TMPDIR}/insert.result"
+  gc_out="${BATS_TMPDIR}/gc-lock.out"
+  gc_err="${BATS_TMPDIR}/gc-lock.err"
   : >"${lockfile}"
+  rm -f "${lock_held}" "${rmtree_started}" "${insert_result}"
+  touch "${rmtree_hold}"
+  export QOPS_GC_RMTREE_STARTED="${rmtree_started}"
+  export QOPS_GC_RMTREE_HOLD="${rmtree_hold}"
   lockcmd="${BATS_TMPDIR}/flock-lock.sh"
   cat >"${lockcmd}" <<EOF
 #!/usr/bin/env bash
 exec 9>"${lockfile}"
-flock 9 || exit 1
+flock -w 60 9 || exit 1
 printf '%s\n' __QOPS_E2B_GC_LOCK_OK__
+touch "${lock_held}"
 cat >/dev/null
 EOF
   chmod +x "${lockcmd}"
+  inserter="${BATS_TMPDIR}/inserter.sh"
+  cat >"${inserter}" <<EOF
+#!/usr/bin/env bash
+exec 8>"${lockfile}"
+flock -w 60 8 || exit 1
+if [[ -d "${STORE}/raced" ]]; then
+  printf 'INSERTED_WHILE_DIR_EXISTS\n' >"${insert_result}"
+else
+  printf 'DIR_GONE\n' >"${insert_result}"
+fi
+EOF
+  chmod +x "${inserter}"
   qf="${BATS_TMPDIR}/query-lockfile.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' __QOPS_E2B_GC_QUERY_OK__
 EOF
   chmod +x "${qf}"
-  run run_gc "${GC}" --query-cmd "${qf}" --lock-cmd "${lockcmd}"
-  [ "$status" -eq 0 ]
+}
+
+@test "lock is held through rmtree so a blocked inserter cannot observe the directory" {
+  setup_lock_spans_rmtree
+  run_gc_slow_rmtree "${GC}" --query-cmd "${qf}" --lock-cmd "${lockcmd}" \
+    >"${gc_out}" 2>"${gc_err}" &
+  gc_pid=$!
+  wait_for_file "${lock_held}"
+  "${inserter}" &
+  ins_pid=$!
+  wait_for_file "${rmtree_started}"
+  # If the lock was dropped before rmtree, the inserter writes during this window.
+  sleep 0.2
+  if [[ -f "${insert_result}" ]]; then
+    echo "inserter acquired lock during rmtree: $(cat "${insert_result}")" >&2
+    echo "gc stderr: $(cat "${gc_err}")" >&2
+    rm -f "${rmtree_hold}"
+    wait "${gc_pid}" || true
+    wait "${ins_pid}" || true
+    return 1
+  fi
+  kill -0 "${ins_pid}"
+  rm -f "${rmtree_hold}"
+  wait "${gc_pid}"
+  gc_status=$?
+  wait "${ins_pid}"
+  [ "${gc_status}" -eq 0 ]
   [ ! -d "${STORE}/raced" ]
+  [ -f "${insert_result}" ]
+  [[ "$(cat "${insert_result}")" == "DIR_GONE" ]]
+}
+
+@test "lock-through-rmtree test fails if the lock is released before rmtree" {
+  setup_lock_spans_rmtree
+  mutated="${BATS_TMPDIR}/gc-unlock-before-rmtree.py"
+  release_lock_before_rmtree "${mutated}"
+  run_gc_slow_rmtree "${mutated}" --query-cmd "${qf}" --lock-cmd "${lockcmd}" \
+    >"${gc_out}" 2>"${gc_err}" &
+  gc_pid=$!
+  wait_for_file "${lock_held}"
+  "${inserter}" &
+  ins_pid=$!
+  wait_for_file "${rmtree_started}"
+  wait_for_file "${insert_result}"
+  got="$(cat "${insert_result}")"
+  rm -f "${rmtree_hold}"
+  wait "${gc_pid}" || true
+  wait "${ins_pid}" || true
+  [[ "${got}" == "INSERTED_WHILE_DIR_EXISTS" ]]
 }
 
 @test "assigned build_id protects a dir; snapshots.id does not" {

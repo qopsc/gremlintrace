@@ -21,7 +21,7 @@ read or render them use `no_log`.
 
 ## Bind addresses (host firewall, not an E2B patch)
 
-The upstream Go binaries bind all interfaces by design:
+The upstream Go binaries **hardcode `0.0.0.0`** by design (not patched):
 
 | Process | Ports |
 |---|---|
