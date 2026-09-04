@@ -9,6 +9,8 @@ EXTRA_VARS="${3:-}"
 
 export ANSIBLE_CONFIG="${REPO_ROOT}/ansible.cfg"
 export ANSIBLE_ROLES_PATH="${REPO_ROOT}/ansible/roles"
+# Template rendering is controller-local and must not require a sudo password.
+export ANSIBLE_BECOME=false
 
 dest="$(mktemp)"
 cleanup() {

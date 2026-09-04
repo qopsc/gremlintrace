@@ -253,6 +253,7 @@ def render_templates(vars_path: pathlib.Path) -> list[str]:
     env = os.environ.copy()
     env["ANSIBLE_CONFIG"] = str(ROOT / "ansible.cfg")
     env["ANSIBLE_ROLES_PATH"] = str(ROOT / "ansible/roles")
+    env["ANSIBLE_BECOME"] = "false"
 
     for role in ROLES:
         template_dir = ROOT / f"ansible/roles/{role}/templates"
