@@ -556,7 +556,7 @@ PY
   install="${REPO_ROOT}/ansible/roles/e2b_services/files/install-e2b-dist.sh"
   verify="${REPO_ROOT}/ansible/roles/e2b_services/files/verify-e2b-dist.sh"
   patch_name="0001-force-stop-marker.patch"
-  patch_sha="ee6e4144cd1ae5a5ff6219a2c68fe90a3e893bb28a06cc8dd9bc30004e2789fa"
+  patch_sha="4da7ddc0c07cbfd67d1afb0f49dcd4106c48f8bc1907e4c353c92b12d2ff2d9c"
   run bash "${install}" "${archive}" "${dest}" "${current}" "${envd}" "${dist_version}" "${patch_name}" "${patch_sha}"
   [ "$status" -eq 0 ]
   run bash "${verify}" "${dest}" "${current}" "${envd}" "${dist_version}" "${patch_name}" "${patch_sha}"

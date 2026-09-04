@@ -22,6 +22,7 @@ def patch_mentions_marker(patch: Path) -> bool:
     text = patch.read_text(encoding="utf-8")
     return (
         "/orchestrator/force-stop" in text
-        and "config.ForceStop = true" in text
+        and "forceStopFromMarker" in text
+        and "return true" in text
         and "os.Stat" in text
     )
