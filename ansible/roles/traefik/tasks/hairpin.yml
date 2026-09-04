@@ -1,0 +1,30 @@
+---
+# Real hairpin gate. site.yml imports this AFTER the kodus role with
+# traefik_hairpin_required=true. The traefik role itself imports it with
+# the default (false) so a first install degrades when the kodus network
+# does not exist yet.
+- name: Install hairpin-check helper
+  ansible.builtin.copy:
+    src: hairpin-check.sh
+    dest: /usr/local/lib/qops/hairpin-check.sh
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - traefik
+
+- name: Hairpin-check api.e2b from the Kodus network
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/hairpin-check.sh
+      {{ traefik_kodus_network }}
+      {{ traefik_hairpin_url }}
+      {{ traefik_hairpin_image }}
+  environment:
+    TRAEFIK_HAIRPIN_REQUIRED: "{{ '1' if (traefik_hairpin_required | bool) else '0' }}"
+    TRAEFIK_HAIRPIN_RETRIES: "{{ traefik_hairpin_retries }}"
+    TRAEFIK_HAIRPIN_DELAY: "{{ traefik_hairpin_delay_seconds }}"
+  register: traefik_hairpin
+  changed_when: false
+  tags:
+    - traefik

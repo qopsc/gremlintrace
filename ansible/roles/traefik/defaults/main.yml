@@ -1,4 +1,59 @@
 ---
 traefik_install_dir: /usr/local/bin
+traefik_binary: "{{ traefik_install_dir }}/traefik"
 traefik_config_dir: /etc/traefik
 traefik_dynamic_config_dir: /etc/traefik/dynamic
+traefik_static_config: "{{ traefik_config_dir }}/traefik.yml"
+traefik_unit: traefik.service
+traefik_user: traefik
+traefik_group: traefik
+traefik_state_dir: /var/lib/traefik
+traefik_acme_storage: "{{ traefik_state_dir }}/acme.json"
+traefik_acme_env_file: /etc/qops/traefik-acme.env
+traefik_acme_env_keys: []
+traefik_cache_dir: /var/cache/qops
+traefik_local_path: ""
+traefik_download_url: ""
+traefik_checksums_url: ""
+
+traefik_entry_web: "0.0.0.0:80"
+traefik_entry_websecure: "0.0.0.0:443"
+traefik_websecure_read_timeout: 0
+traefik_websecure_write_timeout: 0
+traefik_websecure_idle_timeout: 24h
+traefik_idle_conn_timeout: 600s
+traefik_response_header_timeout: 0
+traefik_dial_timeout: 30s
+traefik_api_max_request_body_bytes: 16777216
+traefik_e2b_api_priority: 500
+traefik_e2b_sandbox_priority: 100
+traefik_flush_interval: 0
+
+traefik_e2b_api_url: "http://127.0.0.1:{{ e2b_services_api_port | default(8080) }}"
+traefik_e2b_sandbox_url: "http://127.0.0.1:{{ e2b_services_client_proxy_port | default(3002) }}"
+traefik_kodus_web_url: "http://127.0.0.1:{{ traefik_kodus_web_port }}"
+traefik_kodus_api_url: "http://127.0.0.1:{{ traefik_kodus_api_port }}"
+traefik_kodus_webhooks_url: "http://127.0.0.1:{{ traefik_kodus_webhooks_port }}"
+traefik_kodus_web_port: 3000
+traefik_kodus_api_port: 3001
+traefik_kodus_webhooks_port: 3332
+
+traefik_kodus_network: kodus
+traefik_hairpin_host: "api.e2b.{{ qops_domain }}"
+traefik_hairpin_url: "https://{{ traefik_hairpin_host }}/health"
+traefik_hairpin_image: "{{ e2b_clickhouse_image }}:{{ e2b_clickhouse_tag }}"
+# Required only when imported after kodus / from doctor. The traefik role
+# itself leaves this false so first install can skip a missing network.
+traefik_hairpin_required: false
+traefik_hairpin_retries: 30
+traefik_hairpin_delay_seconds: 2
+traefik_idle_conn_timeout_max: 610s
+traefik_api_min_request_body_bytes: 16777216
+traefik_provided_tls_dir: "{{ traefik_state_dir }}/tls"
+traefik_provided_cert_dest: "{{ traefik_provided_tls_dir }}/tls.crt"
+traefik_provided_key_dest: "{{ traefik_provided_tls_dir }}/tls.key"
+traefik_acme_email: "{{ tls_acme_email | default(e2b_admin_email, true) }}"
+traefik_cert_resolver: letsencrypt
+traefik_archive_name: "traefik_{{ traefik_version }}_linux_amd64.tar.gz"
+traefik_checksums_name: "traefik_{{ traefik_version }}_checksums.txt"
+traefik_release_base_url: "https://github.com/traefik/traefik/releases/download/{{ traefik_version }}"

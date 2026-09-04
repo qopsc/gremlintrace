@@ -1,5 +1,5 @@
 ---
-- name: Codereviewer full install
+- name: Codereviewer full install through Kodus
   hosts: codereviewer
   become: true
   vars_files:
@@ -18,5 +18,20 @@
     - role: e2b_templates
     - role: traefik
     - role: kodus
+  tasks:
+    - name: Hairpin-check api.e2b after Kodus created its network
+      ansible.builtin.include_role:
+        name: traefik
+        tasks_from: hairpin.yml
+      vars:
+        traefik_hairpin_required: true
+
+- name: Codereviewer backup and doctor
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+    - ../group_vars/all.yml
+  roles:
     - role: backup
     - role: doctor

@@ -27,5 +27,12 @@
           kodus_image_tag={{ kodus_image_tag }})
       tags:
         - always
+  tasks:
+    - name: Hairpin-check api.e2b from the Kodus network
+      ansible.builtin.include_role:
+        name: traefik
+        tasks_from: hairpin.yml
+      vars:
+        traefik_hairpin_required: true
   roles:
     - role: doctor

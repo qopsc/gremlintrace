@@ -1,0 +1,34 @@
+From: qops <qops@localhost>
+Subject: [PATCH] orchestrator: honor /orchestrator/force-stop at shutdown
+
+FORCE_STOP is parsed once at process start. A marker file lets upgrade.yml
+force-stop a running orchestrator without waiting for a restart.
+
+---
+ packages/orchestrator/pkg/factories/run.go | 13 +++++++++++--
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/packages/orchestrator/pkg/factories/run.go b/packages/orchestrator/pkg/factories/run.go
+--- a/packages/orchestrator/pkg/factories/run.go
++++ b/packages/orchestrator/pkg/factories/run.go
+@@ -1059,5 +1059,5 @@
+ 	closeCtx, cancelCloseCtx := context.WithCancel(context.Background())
+ 	defer cancelCloseCtx()
+-	if config.ForceStop {
++	if forceStopFromMarker(ctx, config.ForceStop) {
+ 		cancelCloseCtx()
+ 	}
+@@ -1116,1 +1116,13 @@
++func forceStopFromMarker(ctx context.Context, forceStop bool) bool {
++	if forceStop {
++		return true
++	}
++	const forceStopMarker = "/orchestrator/force-stop"
++	if _, err := os.Stat(forceStopMarker); err == nil {
++		logger.L().Info(ctx, "Force-stop marker present; treating shutdown as FORCE_STOP=true")
++		return true
++	}
++	return false
++}
++
+ func startNFSProxy(

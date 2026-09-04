@@ -122,17 +122,23 @@ should parse **the last line of stdout**.
 ```json
 {
   "templates": [
-    { "alias": "base", "action": "built", "buildId": "<id>" },
-    { "alias": "kodus-sandbox", "action": "skipped", "buildId": null },
-    { "alias": "kodus-sandbox-graph", "action": "built", "buildId": "<id>" }
+    { "alias": "base", "templateId": "<id>", "action": "built", "buildId": "<id>" },
+    { "alias": "kodus-sandbox", "templateId": null, "action": "skipped", "buildId": null },
+    { "alias": "kodus-sandbox-graph", "templateId": "<id>", "action": "built", "buildId": "<id>" }
   ]
 }
 ```
+
+**Schema change (review round 1):** each row now includes `templateId`. The
+Local registry tags images as `templateId:buildId`, not `alias:buildId`. The
+host pruner and any consumer of `/var/lib/e2b/templates-last-summary.json`
+must read `templateId`.
 
 | Field | Type | Notes |
 |---|---|---|
 | `templates` | array | Always the three spec aliases, in order (`base` first). |
 | `templates[].alias` | string | `base` \| `kodus-sandbox` \| `kodus-sandbox-graph` |
+| `templates[].templateId` | string or `null` | SDK `BuildInfo.templateId` when `action` is `built`; otherwise `null`. Used by the Local-registry pruner. |
 | `templates[].action` | string | `built` \| `skipped` \| `failed` |
 | `templates[].buildId` | string or `null` | SDK `BuildInfo.buildId` when `action` is `built`; otherwise `null`. Kodus does not consume this. |
 

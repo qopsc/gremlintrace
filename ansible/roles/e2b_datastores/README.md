@@ -30,9 +30,9 @@ Image references use `versions.yml` keys `e2b_*_image` / `e2b_*_tag` only.
 On first volume init and on every re-run (catalog-gated):
 
 - `CREATE SCHEMA IF NOT EXISTS extensions`
-- `CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions`
 
-Phase 0 note: upstream CI creates `pgcrypto` before goose; the spec only requires the `extensions` schema — both are created here.
+The spec does not require `pgcrypto`, so the role does not install optional
+extensions that could make a customer-supplied Postgres image incompatible.
 
 ## Secrets
 

@@ -1,6 +1,542 @@
 ---
-- name: Placeholder for the e2b_services role
-  ansible.builtin.debug:
-    msg: "e2b_services role is implemented in task 7"
+- name: Fail when E2B storage backend is not local
+  ansible.builtin.fail:
+    msg: >-
+      e2b_storage_backend={{ e2b_storage_backend }} is not supported in M1.
+      S3 and NFS backends are planned for M2. Use e2b_storage_backend=local.
+  when: e2b_storage_backend != "local"
+  tags:
+    - e2b_services
+
+- name: Install e2b_services helper scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/lib/qops/{{ item }}"
+    mode: "0755"
+    owner: root
+    group: root
+  loop:
+    - install-e2b-dist.sh
+    - verify-e2b-dist.sh
+    - e2b-read-secret.sh
+    - e2b-set-secret.sh
+    - e2b-psql.sh
+    - e2b-ensure-pg-extensions.sh
+    - e2b-goose-migrate.sh
+    - e2b-seed-if-needed.sh
+    - e2b-apply-limits.sh
+    - e2b-wait-health.sh
+    - e2b-ensure-node-id.sh
+    - e2b-set-force-stop.sh
+  tags:
+    - e2b_services
+
+- name: Create e2b service group
+  ansible.builtin.group:
+    name: "{{ e2b_services_group }}"
+    system: true
+  tags:
+    - e2b_services
+
+- name: Create unprivileged e2b service user
+  ansible.builtin.user:
+    name: "{{ e2b_services_user }}"
+    group: "{{ e2b_services_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}"
+    create_home: false
+  tags:
+    - e2b_services
+
+- name: Ensure root-owned e2b service directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ e2b_services_install_prefix }}"
+    - "{{ e2b_services_config_dir }}"
+    - "{{ e2b_services_dist_cache_dir }}"
+    - "{{ e2b_host_fc_envd_dir }}"
+  tags:
+    - e2b_services
+
+- name: Ensure e2b service working directories are writable by e2b
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ e2b_services_user }}"
+    group: "{{ e2b_services_group }}"
+    mode: "0750"
+  loop:
+    - "{{ e2b_services_template_storage_path }}"
+    - "{{ e2b_services_build_cache_path }}"
+  tags:
+    - e2b_services
+
+- name: Resolve E2B dist archive path
+  ansible.builtin.set_fact:
+    e2b_services_dist_archive_path: >-
+      {{ e2b_services_dist_local_path if (e2b_services_dist_local_path | length > 0)
+         else (e2b_services_dist_cache_dir ~ '/e2b-' ~ e2b_dist_version ~ '.tar.gz') }}
+  tags:
+    - e2b_services
+
+- name: Resolve E2B dist download URL
+  ansible.builtin.set_fact:
+    e2b_services_dist_effective_url: >-
+      {{ e2b_services_dist_download_url if (e2b_services_dist_download_url | length > 0)
+         else (e2b_services_release_base_url_effective ~ '/e2b-' ~ e2b_dist_version ~ '.tar.gz'
+               if (e2b_services_release_base_url_effective | length > 0
+                   and e2b_services_dist_local_path | length == 0)
+               else '') }}
+  tags:
+    - e2b_services
+
+- name: Resolve E2B dist checksum path and URL
+  ansible.builtin.set_fact:
+    e2b_services_dist_effective_checksum_path: >-
+      {{ e2b_services_dist_checksum_path if (e2b_services_dist_checksum_path | length > 0)
+         else (e2b_services_dist_archive_path ~ '.sha256') }}
+    e2b_services_dist_effective_checksum_url: >-
+      {{ e2b_services_dist_checksum_url if (e2b_services_dist_checksum_url | length > 0)
+         else (e2b_services_dist_effective_url ~ '.sha256'
+               if e2b_services_dist_effective_url | length > 0 else '') }}
+  tags:
+    - e2b_services
+
+- name: Download E2B dist archive
+  ansible.builtin.get_url:
+    url: "{{ e2b_services_dist_effective_url }}"
+    dest: "{{ e2b_services_dist_archive_path }}"
+    mode: "0644"
+    force: false
+  register: e2b_services_dist_download
+  failed_when: false
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - e2b_services_dist_effective_url | length > 0
+  tags:
+    - e2b_services
+
+- name: Download E2B dist checksum
+  ansible.builtin.get_url:
+    url: "{{ e2b_services_dist_effective_checksum_url }}"
+    dest: "{{ e2b_services_dist_effective_checksum_path }}"
+    mode: "0644"
+    force: false
+  register: e2b_services_dist_checksum_download
+  failed_when: false
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - e2b_services_dist_effective_checksum_url | length > 0
+  tags:
+    - e2b_services
+
+- name: Assert E2B dist archive is available
+  ansible.builtin.stat:
+    path: "{{ e2b_services_dist_archive_path }}"
+  register: e2b_services_dist_archive_stat
+  tags:
+    - e2b_services
+
+- name: Fail when E2B dist archive is missing
+  ansible.builtin.fail:
+    msg: >-
+      E2B dist archive not found at {{ e2b_services_dist_archive_path }}.
+      Provide it via e2b_services_dist_local_path, e2b_services_dist_download_url,
+      qops_release_base_url, or qops_github_repository
+      (https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/e2b-<e2b_dist_version>.tar.gz).
+  when: not e2b_services_dist_archive_stat.stat.exists
+  tags:
+    - e2b_services
+
+- name: Check whether E2B dist checksum is available
+  ansible.builtin.stat:
+    path: "{{ e2b_services_dist_effective_checksum_path }}"
+  register: e2b_services_dist_checksum_stat
+  tags:
+    - e2b_services
+
+- name: Fail when downloaded E2B dist checksum is missing
+  ansible.builtin.fail:
+    msg: >-
+      E2B dist checksum not found at {{ e2b_services_dist_effective_checksum_path }}.
+      The release must publish e2b-{{ e2b_dist_version }}.tar.gz.sha256 alongside
+      the dist archive.
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - not e2b_services_dist_checksum_stat.stat.exists
+  tags:
+    - e2b_services
+
+- name: Verify E2B dist archive checksum
+  ansible.builtin.command:
+    argv:
+      - sha256sum
+      - --check
+      - "{{ e2b_services_dist_effective_checksum_path | basename }}"
+    chdir: "{{ e2b_services_dist_effective_checksum_path | dirname }}"
+  register: e2b_services_dist_archive_checksum
+  changed_when: false
+  when: e2b_services_dist_checksum_stat.stat.exists
+  tags:
+    - e2b_services
+
+- name: Verify installed E2B dist
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/verify-e2b-dist.sh
+      {{ e2b_services_version_dir }}
+      {{ e2b_services_current_dir }}
+      {{ e2b_services_envd_dest }}
+      {{ e2b_dist_version }}
+  register: e2b_services_dist_verify
+  changed_when: false
+  failed_when: false
+  tags:
+    - e2b_services
+
+- name: Install E2B dist from archive
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/install-e2b-dist.sh
+      {{ e2b_services_dist_archive_path }}
+      {{ e2b_services_version_dir }}
+      {{ e2b_services_current_dir }}
+      {{ e2b_services_envd_dest }}
+      {{ e2b_dist_version }}
+  when: e2b_services_dist_verify.rc != 0
+  register: e2b_services_dist_install
+  changed_when: e2b_services_dist_install.rc == 0
+  tags:
+    - e2b_services
+
+- name: Fail when E2B dist could not be verified after install
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/verify-e2b-dist.sh
+      {{ e2b_services_version_dir }}
+      {{ e2b_services_current_dir }}
+      {{ e2b_services_envd_dest }}
+      {{ e2b_dist_version }}
+  changed_when: false
+  tags:
+    - e2b_services
+
+- name: Persist NODE_ID
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-ensure-node-id.sh {{ e2b_services_node_id_file }}
+  register: e2b_services_node_id_cmd
+  changed_when: false
+  when: e2b_services_node_id | length == 0
+  tags:
+    - e2b_services
+
+- name: Resolve NODE_ID for env files
+  ansible.builtin.set_fact:
+    e2b_services_node_id: >-
+      {{ e2b_services_node_id if (e2b_services_node_id | length > 0)
+         else (e2b_services_node_id_cmd.stdout | trim) }}
+  tags:
+    - e2b_services
+
+- name: Load SANDBOX_ACCESS_TOKEN_HASH_SEED
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} SANDBOX_ACCESS_TOKEN_HASH_SEED
+  register: e2b_services_secret_hash_seed
+  changed_when: false
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Load E2B_POSTGRES_PASSWORD
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} E2B_POSTGRES_PASSWORD
+  register: e2b_services_secret_pg
+  changed_when: false
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Load E2B_CLICKHOUSE_USERNAME
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} E2B_CLICKHOUSE_USERNAME
+  register: e2b_services_secret_ch_user
+  changed_when: false
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Load E2B_CLICKHOUSE_PASSWORD
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} E2B_CLICKHOUSE_PASSWORD
+  register: e2b_services_secret_ch_pass
+  changed_when: false
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Materialize secret values for env rendering
+  ansible.builtin.set_fact:
+    e2b_services_sandbox_access_token_hash_seed: "{{ e2b_services_secret_hash_seed.stdout }}"
+    e2b_services_postgres_password: "{{ e2b_services_secret_pg.stdout }}"
+    e2b_services_clickhouse_username: "{{ e2b_services_secret_ch_user.stdout }}"
+    e2b_services_clickhouse_password: "{{ e2b_services_secret_ch_pass.stdout }}"
+    e2b_services_postgres_connection_string: >-
+      {{ 'postgres://' ~ e2b_datastores_postgres_user ~ ':'
+         ~ e2b_services_secret_pg.stdout ~ '@'
+         ~ e2b_datastores_postgres_bind_host ~ ':'
+         ~ e2b_datastores_postgres_port ~ '/'
+         ~ e2b_datastores_postgres_db ~ '?sslmode=disable' }}
+    e2b_services_clickhouse_connection_string: >-
+      {{ 'clickhouse://' ~ e2b_services_secret_ch_user.stdout ~ ':'
+         ~ e2b_services_secret_ch_pass.stdout ~ '@'
+         ~ e2b_datastores_clickhouse_bind_host ~ ':'
+         ~ e2b_datastores_clickhouse_native_port ~ '/'
+         ~ e2b_datastores_clickhouse_db }}
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Render orchestrator environment file
+  ansible.builtin.template:
+    src: orchestrator.env.j2
+    dest: "{{ e2b_services_orchestrator_env }}"
+    owner: root
+    group: root
+    mode: "0600"
+    diff: false
+  no_log: true
+  notify: Restart e2b-orchestrator
+  tags:
+    - e2b_services
+
+- name: Render api environment file
+  ansible.builtin.template:
+    src: api.env.j2
+    dest: "{{ e2b_services_api_env }}"
+    owner: root
+    group: root
+    mode: "0600"
+    diff: false
+  no_log: true
+  notify: Restart e2b-api
+  tags:
+    - e2b_services
+
+- name: Render client-proxy environment file
+  ansible.builtin.template:
+    src: client-proxy.env.j2
+    dest: "{{ e2b_services_client_proxy_env }}"
+    owner: root
+    group: root
+    mode: "0600"
+    diff: false
+  no_log: true
+  notify: Restart e2b-client-proxy
+  tags:
+    - e2b_services
+
+- name: Ensure postgres extensions schema exists
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-ensure-pg-extensions.sh
+      /usr/local/lib/qops/e2b-psql.sh
+      {{ e2b_datastores_compose_file }}
+      {{ common_qops_secrets_file }}
+      {{ e2b_datastores_compose_project }}
+      {{ e2b_datastores_postgres_user }}
+      {{ e2b_datastores_postgres_db }}
+  register: e2b_services_pg_ext
+  changed_when: (e2b_services_pg_ext.stdout | trim) == "created"
+  tags:
+    - e2b_services
+
+- name: Run goose postgres migrations
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-goose-migrate.sh
+      {{ e2b_services_goose_bin }}
+      postgres
+      {{ e2b_services_postgres_migrations_dir }}
+  environment:
+    GOOSE_DBSTRING: "{{ e2b_services_postgres_connection_string }}"
+  register: e2b_services_goose_pg
+  changed_when: (e2b_services_goose_pg.stdout | trim) == "applied"
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Run goose clickhouse migrations
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-goose-migrate.sh
+      {{ e2b_services_goose_bin }}
+      clickhouse
+      {{ e2b_services_clickhouse_migrations_dir }}
+  environment:
+    GOOSE_DBSTRING: "{{ e2b_services_clickhouse_connection_string }}"
+  register: e2b_services_goose_ch
+  changed_when: (e2b_services_goose_ch.stdout | trim) == "applied"
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Apply ClickHouse metrics TTL after migrations
+  ansible.builtin.command:
+    cmd: >-
+      {{ e2b_services_clickhouse_ttl_helper }}
+      {{ e2b_datastores_compose_file }}
+      {{ e2b_clickhouse_retention_days }}
+  register: e2b_services_ch_ttl
+  changed_when: "'TTL updated' in e2b_services_ch_ttl.stdout"
+  tags:
+    - e2b_services
+
+- name: Seed E2B team when the email is absent from teams
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-seed-if-needed.sh
+      {{ e2b_admin_email }}
+      {{ e2b_services_seed_bin }}
+      {{ common_qops_secrets_file }}
+      /usr/local/lib/qops/e2b-psql.sh
+      {{ e2b_datastores_compose_file }}
+      {{ common_qops_secrets_file }}
+      {{ e2b_datastores_compose_project }}
+      {{ e2b_datastores_postgres_user }}
+      {{ e2b_datastores_postgres_db }}
+  environment:
+    E2B_SEEDED_KEY_FILE: "{{ e2b_services_seeded_key_file }}"
+    POSTGRES_CONNECTION_STRING: "{{ e2b_services_postgres_connection_string }}"
+  register: e2b_services_seed
+  changed_when: (e2b_services_seed.stdout | trim) == "seeded"
+  no_log: true
+  tags:
+    - e2b_services
+
+- name: Apply team concurrency addon and optional tier hour raise
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-apply-limits.sh
+      {{ e2b_admin_email }}
+      {{ e2b_services_addon_name }}
+      {{ [e2b_max_concurrent_sandboxes | int - e2b_services_base_tier_concurrent_sandboxes | int, 0] | max }}
+      {{ e2b_extra_concurrent_template_builds }}
+      {{ e2b_max_sandbox_hours }}
+      /usr/local/lib/qops/e2b-psql.sh
+      {{ e2b_datastores_compose_file }}
+      {{ common_qops_secrets_file }}
+      {{ e2b_datastores_compose_project }}
+      {{ e2b_datastores_postgres_user }}
+      {{ e2b_datastores_postgres_db }}
+  register: e2b_services_limits
+  changed_when: (e2b_services_limits.stdout | trim) == "changed"
+  tags:
+    - e2b_services
+
+- name: Install e2b-orchestrator systemd unit
+  ansible.builtin.template:
+    src: e2b-orchestrator.service.j2
+    dest: "/etc/systemd/system/{{ e2b_services_orchestrator_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart e2b-orchestrator
+  tags:
+    - e2b_services
+
+- name: Install e2b-api systemd unit
+  ansible.builtin.template:
+    src: e2b-api.service.j2
+    dest: "/etc/systemd/system/{{ e2b_services_api_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart e2b-api
+  tags:
+    - e2b_services
+
+- name: Install e2b-client-proxy systemd unit
+  ansible.builtin.template:
+    src: e2b-client-proxy.service.j2
+    dest: "/etc/systemd/system/{{ e2b_services_client_proxy_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart e2b-client-proxy
+  tags:
+    - e2b_services
+
+- name: Flush e2b_services handlers before starting units
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - e2b_services
+
+- name: Enable and start e2b-orchestrator
+  ansible.builtin.service:
+    name: "{{ e2b_services_orchestrator_unit }}"
+    enabled: true
+    state: started
+  tags:
+    - e2b_services
+
+- name: Enable and start e2b-api
+  ansible.builtin.service:
+    name: "{{ e2b_services_api_unit }}"
+    enabled: true
+    state: started
+  tags:
+    - e2b_services
+
+- name: Enable and start e2b-client-proxy
+  ansible.builtin.service:
+    name: "{{ e2b_services_client_proxy_unit }}"
+    enabled: true
+    state: started
+  tags:
+    - e2b_services
+
+- name: Wait for orchestrator health
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-wait-health.sh
+      http://127.0.0.1:{{ e2b_services_orchestrator_port }}/health
+      {{ e2b_services_health_retries }}
+      {{ e2b_services_health_delay_seconds }}
+  changed_when: false
+  tags:
+    - e2b_services
+
+- name: Wait for API health including 503-until-node-discovered
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-wait-health.sh
+      http://127.0.0.1:{{ e2b_services_api_port }}/health
+      {{ e2b_services_health_retries }}
+      {{ e2b_services_health_delay_seconds }}
+  changed_when: false
+  tags:
+    - e2b_services
+
+- name: Wait for client-proxy health port
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-wait-health.sh
+      http://127.0.0.1:{{ e2b_services_client_proxy_health_port }}
+      {{ e2b_services_health_retries }}
+      {{ e2b_services_health_delay_seconds }}
+      1
+  changed_when: false
   tags:
     - e2b_services

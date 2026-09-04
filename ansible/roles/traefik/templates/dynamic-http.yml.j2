@@ -1,0 +1,120 @@
+---
+http:
+  routers:
+    e2b-api:
+      rule: Host(`api.e2b.{{ qops_domain }}`)
+      entryPoints:
+        - websecure
+      priority: {{ traefik_e2b_api_priority }}
+      service: e2b-api
+{% if tls_mode == "acme_dns" %}
+      tls:
+        certResolver: {{ traefik_cert_resolver }}
+        domains:
+          - main: e2b.{{ qops_domain }}
+            sans:
+              - "*.e2b.{{ qops_domain }}"
+{% else %}
+      tls: {}
+{% endif %}
+    e2b-sandbox:
+      rule: HostRegexp(`^.+\.e2b\.{{ qops_domain | regex_escape }}$`)
+      entryPoints:
+        - websecure
+      priority: {{ traefik_e2b_sandbox_priority }}
+      service: e2b-sandbox
+{% if tls_mode == "acme_dns" %}
+      tls:
+        certResolver: {{ traefik_cert_resolver }}
+        domains:
+          - main: e2b.{{ qops_domain }}
+            sans:
+              - "*.e2b.{{ qops_domain }}"
+{% else %}
+      tls: {}
+{% endif %}
+    kodus-web:
+      rule: Host(`kodus.{{ qops_domain }}`)
+      entryPoints:
+        - websecure
+      service: kodus-web
+{% if tls_mode == "acme_dns" %}
+      tls:
+        certResolver: {{ traefik_cert_resolver }}
+        domains:
+          - main: {{ qops_domain }}
+            sans:
+              - "*.{{ qops_domain }}"
+{% else %}
+      tls: {}
+{% endif %}
+    kodus-api:
+      rule: Host(`kodus-api.{{ qops_domain }}`)
+      entryPoints:
+        - websecure
+      service: kodus-api
+{% if tls_mode == "acme_dns" %}
+      tls:
+        certResolver: {{ traefik_cert_resolver }}
+        domains:
+          - main: {{ qops_domain }}
+            sans:
+              - "*.{{ qops_domain }}"
+{% else %}
+      tls: {}
+{% endif %}
+    kodus-webhooks:
+      rule: Host(`kodus-webhooks.{{ qops_domain }}`)
+      entryPoints:
+        - websecure
+      service: kodus-webhooks
+{% if tls_mode == "acme_dns" %}
+      tls:
+        certResolver: {{ traefik_cert_resolver }}
+        domains:
+          - main: {{ qops_domain }}
+            sans:
+              - "*.{{ qops_domain }}"
+{% else %}
+      tls: {}
+{% endif %}
+  # No buffering middleware. Traefik streams request/response bodies; that is
+  # required for long-running commands.run. Without a body-limit middleware
+  # the api.e2b router admits bodies of any size
+  # (>= {{ traefik_api_max_request_body_bytes }} bytes, asserted at render time).
+  services:
+    e2b-api:
+      loadBalancer:
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: {{ traefik_flush_interval }}
+        servers:
+          - url: {{ traefik_e2b_api_url }}
+    e2b-sandbox:
+      loadBalancer:
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: {{ traefik_flush_interval }}
+        servers:
+          - url: {{ traefik_e2b_sandbox_url }}
+    kodus-web:
+      loadBalancer:
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: {{ traefik_flush_interval }}
+        servers:
+          - url: {{ traefik_kodus_web_url }}
+    kodus-api:
+      loadBalancer:
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: {{ traefik_flush_interval }}
+        servers:
+          - url: {{ traefik_kodus_api_url }}
+    kodus-webhooks:
+      loadBalancer:
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: {{ traefik_flush_interval }}
+        servers:
+          - url: {{ traefik_kodus_webhooks_url }}

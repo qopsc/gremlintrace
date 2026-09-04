@@ -1,4 +1,3 @@
--- Phase 0 verification: upstream CI creates pgcrypto before goose migrations; the spec only
--- requires the extensions schema. Both are harmless and satisfy migration prerequisites.
+-- Goose migrations require the extensions schema; no optional extension is
+-- installed here.
 CREATE SCHEMA IF NOT EXISTS extensions;
-CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
