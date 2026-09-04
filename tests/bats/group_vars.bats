@@ -28,6 +28,24 @@ setup() {
   [[ "$output" != *"FAILED"* ]]
 }
 
+@test "extra vars still override inventory operator values" {
+  OPERATOR_INVENTORY="${REPO_ROOT}/tests/fixtures/inventory-codereviewer-operator.yml"
+  run ansible-playbook --check -i "${OPERATOR_INVENTORY}" "${DOCTOR_PLAYBOOK}" \
+    --extra-vars "ansible_become=false" \
+    --extra-vars "tls_mode=internal_ca"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tls_mode=internal_ca"* ]]
+  [[ "$output" != *"FAILED"* ]]
+}
+
+@test "all playbooks load inventory-overridable defaults" {
+  for playbook in "${REPO_ROOT}"/ansible/playbooks/*.yml; do
+    run ansible-playbook --list-tasks -i "${INVENTORY}" "${playbook}"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Load documented defaults without overriding inventory"* ]]
+  done
+}
+
 @test "tls_mode default in group_vars/all.yml is acme_dns" {
   run grep -E '^tls_mode:[[:space:]]*"?acme_dns"?[[:space:]]*$' \
     "${REPO_ROOT}/ansible/group_vars/all.yml"

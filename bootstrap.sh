@@ -2,7 +2,11 @@
 # Thin entry point: ensure Ansible is available, then run ansible-playbook.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if [[ "${SCRIPT_PATH}" != */* ]]; then
+  SCRIPT_PATH="./${SCRIPT_PATH}"
+fi
+SCRIPT_DIR="$(cd "${SCRIPT_PATH%/*}" && pwd)"
 export ANSIBLE_CONFIG="${SCRIPT_DIR}/ansible.cfg"
 
 INVENTORY="${SCRIPT_DIR}/ansible/inventory/example.yml"
@@ -129,6 +133,7 @@ prepend_pipx_bin_to_path() {
 }
 
 ensure_ansible() {
+  prepend_pipx_bin_to_path
   if command -v ansible-playbook >/dev/null 2>&1; then
     return 0
   fi
@@ -242,5 +247,13 @@ if [[ "${#EXTRA_VARS[@]}" -gt 0 ]]; then
   done
 fi
 
-log "exec: ${ANSIBLE_ARGS[*]}"
+LOG_ARGS=("${ANSIBLE_ARGS[@]}")
+for ((i = 0; i < ${#LOG_ARGS[@]}; i++)); do
+  if [[ "${LOG_ARGS[$i]}" == "--extra-vars" ]]; then
+    i=$((i + 1))
+    LOG_ARGS[i]='[REDACTED]'
+  fi
+done
+
+log "exec: ${LOG_ARGS[*]}"
 exec "${ANSIBLE_ARGS[@]}"

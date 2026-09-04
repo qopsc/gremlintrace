@@ -104,6 +104,7 @@ assert_order_equals() {
   run run_bootstrap --syntax-check
   [ "$status" -eq 0 ]
   assert_order_equals \
+    "pipx:environment" \
     "pipx:ensurepath" \
     "pipx:environment" \
     "pipx:install" \
@@ -117,7 +118,7 @@ assert_order_equals() {
     "--syntax-check"
 }
 
-@test "preinstalled ansible-playbook in pipx bin survives pipx install failure" {
+@test "preinstalled ansible-playbook in pipx bin avoids package installation" {
   /bin/cp "${BOOTSTRAP_AP_PLAYBOOK_STUB}" "${PIPX_BIN}/ansible-playbook"
   /bin/chmod +x "${PIPX_BIN}/ansible-playbook"
   export BOOTSTRAP_PIPX_INSTALL_FAIL=already-installed
@@ -126,9 +127,8 @@ assert_order_equals() {
   run run_bootstrap --syntax-check
   [ "$status" -eq 0 ]
   assert_order_equals \
-    "pipx:ensurepath" \
     "pipx:environment" \
-    "pipx:install" \
+    "pipx:ensurepath" \
     "pipx:environment" \
     "ansible-playbook"
   assert_argv_equals \

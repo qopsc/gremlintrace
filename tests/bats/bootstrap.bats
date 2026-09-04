@@ -56,6 +56,17 @@ teardown() {
     "${REPO_ROOT}/ansible/inventory/example.yml"
 }
 
+@test "bare script invocation resolves the repository directory" {
+  run env PATH="${STUB_BIN}:${PATH}" /bin/bash -c \
+    'cd "$1" && bash bootstrap.sh --skip-install' _ "${REPO_ROOT}"
+  [ "$status" -eq 0 ]
+  assert_argv_equals \
+    "${STUB_BIN}/ansible-playbook" \
+    "${REPO_ROOT}/ansible/playbooks/site.yml" \
+    "-i" \
+    "${REPO_ROOT}/ansible/inventory/example.yml"
+}
+
 @test "default invocation handles an empty extra-vars array under system Bash" {
   run /bin/bash "${BOOTSTRAP}" --skip-install
   [ "$status" -eq 0 ]
@@ -98,6 +109,9 @@ teardown() {
     -e "foo=bar" \
     -e "baz=qux"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"--extra-vars [REDACTED]"* ]]
+  [[ "$output" != *"foo=bar"* ]]
+  [[ "$output" != *"baz=qux"* ]]
   assert_argv_equals \
     "${STUB_BIN}/ansible-playbook" \
     "${REPO_ROOT}/ansible/playbooks/site.yml" \
