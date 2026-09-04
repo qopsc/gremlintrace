@@ -133,9 +133,11 @@ python3 -m pip install --disable-pip-version-check --user -q \
   "ansible-lint==$(yaml_get ansible_lint_version)" \
   "yamllint==$(yaml_get yamllint_version)"
 
-ansible-galaxy collection install --force \
-  "ansible.posix:$(yaml_get ansible_posix_version)" \
-  "community.general:$(yaml_get community_general_version)"
+( unset LC_ALL
+  ansible-galaxy collection install --force \
+    "ansible.posix:$(yaml_get ansible_posix_version)" \
+    "community.general:$(yaml_get community_general_version)"
+)
 
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
