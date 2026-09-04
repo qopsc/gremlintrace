@@ -204,6 +204,9 @@ PY
 }
 
 @test "systemd-analyze verify accepts backup and GC units" {
+  if ! command -v systemd-analyze >/dev/null 2>&1; then
+    skip "systemd-analyze validation requires systemd tools"
+  fi
   vars="${BATS_TMPDIR}/prod-vars.yml"
   python3 - "${REPO_ROOT}" "${vars}" <<'PY'
 import pathlib, sys, yaml
