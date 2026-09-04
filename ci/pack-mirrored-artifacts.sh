@@ -86,6 +86,9 @@ cp -a "${ARTIFACTS_DIR}/busybox" "${STAGE}/"
 
 mkdir -p "$(dirname "${OUT_FILE}")"
 tar -C "${STAGE}" -czf "${OUT_FILE}" firecrackers kernels busybox SHA256SUMS
-sha256sum "${OUT_FILE}" >"${OUT_FILE}.sha256"
+(
+  cd "$(dirname "${OUT_FILE}")"
+  sha256sum "$(basename "${OUT_FILE}")"
+) >"${OUT_FILE}.sha256"
 
 printf 'pack-mirrored-artifacts: ok -> %s\n' "${OUT_FILE}"

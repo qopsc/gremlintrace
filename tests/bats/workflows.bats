@@ -69,6 +69,9 @@ for key in (
     "firecracker_version",
     "kernel_version",
     "busybox_version",
+    "firecracker_sha256",
+    "kernel_sha256",
+    "busybox_sha256",
     "envd_version",
     "e2b_postgres_tag",
     "e2b_redis_tag",
@@ -112,15 +115,9 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-# The dependency checker itself is a lint-time tool, never invoked by a build or
-# mirror job. It runs only under `make check`, where ci/install-lint-tools.sh
-# installs PyYAML at a pinned version.
-skip = {root / "ci/check_workflow_job_deps.py"}
 errors = []
 for pattern in ("ci/*.py", "ci/*.sh", "e2b/build/build.sh"):
     for path in sorted(root.glob(pattern)):
-        if path in skip:
-            continue
         text = path.read_text(encoding="utf-8")
         if re.search(r"(^|\n)import yaml\b", text) or re.search(r"(^|\n)from yaml\b", text):
             errors.append(f"{path}: imports PyYAML")
@@ -133,4 +130,20 @@ print("ok")
 PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
+}
+
+@test "release workflow is main-only and refuses mutable tags" {
+  run grep -F "github.ref == 'refs/heads/main'" "${WORKFLOWS_DIR}/build-e2b.yml"
+  [ "$status" -eq 0 ]
+  run grep -F 'git/ref/tags/${tag}' "${WORKFLOWS_DIR}/build-e2b.yml"
+  [ "$status" -eq 0 ]
+  run grep -F 'release already exists' "${WORKFLOWS_DIR}/build-e2b.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "pin-bump dispatches validations with a workflow-capable token" {
+  run grep -F 'actions: write' "${WORKFLOWS_DIR}/pin-bump.yml"
+  [ "$status" -eq 0 ]
+  run grep -F 'gh workflow run "${workflow}" --ref "${ref}"' "${WORKFLOWS_DIR}/pin-bump.yml"
+  [ "$status" -eq 0 ]
 }

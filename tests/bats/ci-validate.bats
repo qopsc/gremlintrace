@@ -120,13 +120,24 @@ EOF
   [[ "$output" == *"could not extract expectedMigrationTimestamp"* ]]
 }
 
-@test "stage-release stages dist and packed mirrored tarballs only" {
-  local artifacts upload dist mirrored packed
+@test "stage-release stages dist, checksums, and packed mirrored tarballs" {
+  local artifacts upload dist mirrored packed fc_ver kernel_ver busybox_ver
   artifacts="${TEST_TMPDIR}/artifacts"
   upload="${TEST_TMPDIR}/upload"
   dist="${TEST_TMPDIR}/e2b-dist.tar.gz"
   printf 'dist\n' >"${dist}"
-  "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --out "${artifacts}"
+  fc_ver="$(python3 "${REPO_ROOT}/ci/yaml_versions.py" get firecracker_version "${VERSIONS_FILE}")"
+  kernel_ver="$(python3 "${REPO_ROOT}/ci/yaml_versions.py" get kernel_version "${VERSIONS_FILE}")"
+  busybox_ver="$(python3 "${REPO_ROOT}/ci/yaml_versions.py" get busybox_version "${VERSIONS_FILE}")"
+  mkdir -p \
+    "${artifacts}/firecrackers/${fc_ver}/amd64" \
+    "${artifacts}/kernels/${kernel_ver}/amd64" \
+    "${artifacts}/busybox/${busybox_ver}/amd64"
+  printf 'fc\n' >"${artifacts}/firecrackers/${fc_ver}/amd64/firecracker"
+  printf 'kernel\n' >"${artifacts}/kernels/${kernel_ver}/amd64/vmlinux.bin"
+  printf 'busybox\n' >"${artifacts}/busybox/${busybox_ver}/amd64/busybox"
+  printf '%s  busybox\n' "$(sha256sum "${artifacts}/busybox/${busybox_ver}/amd64/busybox" | awk '{print $1}')" \
+    >"${artifacts}/busybox/${busybox_ver}/amd64/busybox.sha256"
   packed="${TEST_TMPDIR}/e2b-fc-artifacts.tar.gz"
   "${REPO_ROOT}/ci/pack-mirrored-artifacts.sh" --artifacts "${artifacts}" --out "${packed}"
   run "${REPO_ROOT}/ci/stage-release.sh" \
@@ -135,7 +146,10 @@ EOF
     --upload-dir "${upload}"
   [ "$status" -eq 0 ]
   [ -f "${upload}/e2b-dist.tar.gz" ]
+  [ -f "${upload}/e2b-dist.tar.gz.sha256" ]
   [ -f "${upload}/e2b-fc-artifacts.tar.gz" ]
   [ -f "${upload}/e2b-fc-artifacts.tar.gz.sha256" ]
-  [ "$(find "${upload}" -mindepth 1 -maxdepth 1 | wc -l)" -eq 3 ]
+  run bash -c 'cd "$1" && sha256sum -c "$(basename "$2").sha256"' bash "${upload}" "${upload}/e2b-dist.tar.gz"
+  [ "$status" -eq 0 ]
+  [ "$(find "${upload}" -mindepth 1 -maxdepth 1 | wc -l)" -eq 4 ]
 }

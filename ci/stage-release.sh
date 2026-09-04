@@ -52,6 +52,10 @@ mkdir -p "${UPLOAD_DIR}"
 cp "${DIST_TARBALL}" "${UPLOAD_DIR}/"
 cp "${MIRRORED_TARBALL}" "${UPLOAD_DIR}/"
 cp "${MIRRORED_TARBALL}.sha256" "${UPLOAD_DIR}/"
+(
+  cd "${UPLOAD_DIR}"
+  sha256sum "$(basename "${DIST_TARBALL}")"
+) >"${UPLOAD_DIR}/$(basename "${DIST_TARBALL}").sha256"
 
 printf 'stage-release: ok -> %s\n' "${UPLOAD_DIR}"
 ls -1 "${UPLOAD_DIR}"

@@ -124,13 +124,10 @@ install_actionlint() {
 
 install_actionlint
 
-# PyYAML arrives transitively via ansible-core, but ci/check_workflow_job_deps.py
-# depends on it directly, so pin it rather than inherit whatever ansible resolves.
 python3 -m pip install --disable-pip-version-check --user -q \
   "ansible-core==$(yaml_get ansible_core_version)" \
   "ansible-lint==$(yaml_get ansible_lint_version)" \
-  "yamllint==$(yaml_get yamllint_version)" \
-  "PyYAML==$(yaml_get pyyaml_version)"
+  "yamllint==$(yaml_get yamllint_version)"
 
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

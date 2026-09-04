@@ -69,7 +69,17 @@ EOF
   chmod +x "${STUB_BIN}/curl"
 
   export PATH="${STUB_BIN}:${PATH}"
-  VERSIONS_FILE="${REPO_ROOT}/versions.yml"
+  VERSIONS_FILE="${TEST_TMPDIR}/versions.yml"
+  cp "${REPO_ROOT}/versions.yml" "${VERSIONS_FILE}"
+  fc_sha="$(printf 'fc-bytes' | sha256sum | awk '{print $1}')"
+  kernel_sha="$(printf 'kernel-bytes' | sha256sum | awk '{print $1}')"
+  busybox_sha="$(printf '%s' "${MIRROR_STUB_BUSYBOX_BYTES:-busybox-bytes}" | sha256sum | awk '{print $1}')"
+  sed -i.bak \
+    -e "s/^firecracker_sha256:.*/firecracker_sha256: \"${fc_sha}\"/" \
+    -e "s/^kernel_sha256:.*/kernel_sha256: \"${kernel_sha}\"/" \
+    -e "s/^busybox_sha256:.*/busybox_sha256: \"${busybox_sha}\"/" \
+    "${VERSIONS_FILE}"
+  rm -f "${VERSIONS_FILE}.bak"
 }
 
 teardown() {
@@ -79,7 +89,7 @@ teardown() {
 @test "mirror-e2b-artifacts succeeds and lays out fc/config.go paths" {
   local out
   out="${TEST_TMPDIR}/artifacts"
-  run "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --out "${out}"
+  run "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --versions "${VERSIONS_FILE}" --out "${out}"
   [ "$status" -eq 0 ]
   run python3 - "${out}" "${VERSIONS_FILE}" "${REPO_ROOT}" <<'PY'
 import sys
@@ -108,24 +118,26 @@ PY
   [ "$output" = "ok" ]
 }
 
-@test "mirror-e2b-artifacts fails closed on HTTP 404 and removes output tree" {
+@test "mirror-e2b-artifacts preserves an existing output tree on HTTP 404" {
   local out
   out="${TEST_TMPDIR}/artifacts-404"
+  mkdir -p "${out}"
+  printf 'keep me\n' >"${out}/sentinel"
   export MIRROR_STUB_HTTP_CODE="404"
-  run "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --out "${out}"
+  run "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --versions "${VERSIONS_FILE}" --out "${out}"
   [ "$status" -ne 0 ]
   [[ "$output" == *"download failed (404)"* ]]
-  [ ! -d "${out}" ]
+  [ -f "${out}/sentinel" ]
 }
 
 @test "mirror-e2b-artifacts fails closed on busybox checksum mismatch" {
   local out
   out="${TEST_TMPDIR}/artifacts-bad-sha"
   export MIRROR_STUB_BAD_BUSYBOX_SHA="1"
-  run "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --out "${out}"
+  run "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --versions "${VERSIONS_FILE}" --out "${out}"
   [ "$status" -ne 0 ]
   [[ "$output" == *"FAILED"* || "$output" == *"sha256sum"* ]]
-  [ ! -d "${out}" ]
+  [ ! -e "${out}/firecrackers" ]
 }
 
 @test "pack-mirrored-artifacts preserves hierarchy inside tarball" {
@@ -133,8 +145,10 @@ PY
   artifacts="${TEST_TMPDIR}/artifacts"
   packed="${TEST_TMPDIR}/e2b-fc-artifacts-test.tar.gz"
   extract="${TEST_TMPDIR}/extract"
-  "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --out "${artifacts}"
+  "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --versions "${VERSIONS_FILE}" --out "${artifacts}"
   run "${REPO_ROOT}/ci/pack-mirrored-artifacts.sh" --artifacts "${artifacts}" --out "${packed}"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && sha256sum -c "$(basename "$2").sha256"' bash "$(dirname "${packed}")" "${packed}"
   [ "$status" -eq 0 ]
   mkdir -p "${extract}"
   tar -xzf "${packed}" -C "${extract}"

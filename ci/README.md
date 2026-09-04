@@ -21,7 +21,8 @@ upload are untested here.
 
 ### Triggers
 
-- `workflow_dispatch` — operator-initiated dist build **and** GitHub Release publish.
+- `workflow_dispatch` — operator-initiated dist build **and** GitHub Release publish
+  when run from `main`.
 - `push` / `pull_request` — only when `versions.yml`, `e2b/**`, or this workflow
   changes. Builds and validates; **does not** publish a release on PRs or ordinary
   pushes (avoids accidental releases on every merge).
@@ -47,12 +48,15 @@ explicit operator action after review, not a side effect of merging.
 3. **`mirror-artifacts` job** (parallel) — `ci/mirror-e2b-artifacts.sh` downloads
    Firecracker, kernel, and busybox from `https://storage.googleapis.com/e2b-artifact-binaries/`
    into the layout upstream `fc/config.go` expects (`<kind>/<ver>/amd64/<file>`),
-   verifies busybox against the published `.sha256`, writes `artifacts-SHA256SUMS`,
+   verifies all three binaries against the SHA-256 pins in `versions.yml` and busybox
+   against the published `.sha256`, writes `artifacts-SHA256SUMS`,
    then `ci/pack-mirrored-artifacts.sh` packs the tree into a single release tarball
    (plain `files:` upload would flatten paths). Fails on HTTP non-200 and removes
-   the output tree on any error.
-4. **`publish-release` job** (`workflow_dispatch` only) — `ci/stage-release.sh`
-   uploads dist + packed FC tarball + sidecar checksum to a GitHub Release tagged
+   only its temporary staging tree on any error, preserving pre-existing output
+   contents.
+4. **`publish-release` job** (`workflow_dispatch` on `main` only) —
+   `ci/stage-release.sh` uploads the dist tarball and checksum plus the packed FC
+   tarball and checksum to a new, immutable GitHub Release tagged
    `e2b-<e2b_dist_version>`.
 
 ### Release asset layout
@@ -63,6 +67,7 @@ Ansible (later tasks) downloads assets from the release tagged
 | Release asset | Purpose |
 |---|---|
 | `e2b-<e2b_dist_version>.tar.gz` | Built dist: `bin/*`, migrations, `otel-collector.yaml`, `BUILD_INFO`, `SHA256SUMS` |
+| `e2b-<e2b_dist_version>.tar.gz.sha256` | SHA-256 checksum of the dist tarball |
 | `e2b-fc-artifacts-<e2b_dist_version>.tar.gz` | Mirrored Firecracker/kernel/busybox tree (hierarchy preserved) |
 | `e2b-fc-artifacts-<e2b_dist_version>.tar.gz.sha256` | SHA-256 checksum of the FC artifacts tarball |
 
@@ -102,10 +107,14 @@ No repository secrets are required.
 1. `ci/bump-e2b-pin.sh` resolves `e2b-dev/infra` `HEAD` via `git ls-remote`.
 2. If it differs from `versions.yml:e2b_pin`, updates `versions.yml`
    (`e2b_pin`, `e2b_dist_version`, `e2b_go_version` from upstream `go.work`,
-   `envd_version`, `goose_version`) and syncs `e2b/e2b.pin`.
+   `envd_version`, `goose_version`, Firecracker/kernel/busybox versions, and
+   their SHA-256 pins) and syncs `e2b/e2b.pin`. When the upstream pin is already
+   current, it still verifies the three committed artifact hashes.
 3. Opens a pull request via `peter-evans/create-pull-request` on branch
-   `automation/bump-e2b-pin`. Does **not** push to the default branch and does
-   **not** auto-merge.
+   `automation/bump-e2b-pin`. The workflow then explicitly dispatches the E2B
+   build and lint workflows for that branch (and an installer matrix when present),
+   because a PR created with `GITHUB_TOKEN` does not start pull-request workflows.
+   It does **not** push to the default branch and does **not** auto-merge.
 
 A dist bump that changes envd, kernel, or Firecracker pins requires E2B template
 rebuilds; `upgrade.yml` (a later task) handles that via `env_builds.envd_version`.
@@ -114,13 +123,13 @@ rebuilds; `upgrade.yml` (a later task) handles that via `env_builds.envd_version
 
 | Job | `permissions` | Secrets |
 |---|---|---|
-| `bump-pin` | `contents: write`, `pull-requests: write` | `GITHUB_TOKEN` (default) |
+| `bump-pin` | `actions: write`, `contents: write`, `pull-requests: write` | `GITHUB_TOKEN` (default) |
 
 ## `lint.yml`
 
 ### Triggers
 
-- `pull_request`
+- `workflow_dispatch`, `pull_request`
 - `push` to `main`
 
 ### What it does
@@ -153,8 +162,8 @@ Or wait for / run `pin-bump.yml` to open an automated upstream pin PR.
 
 1. Ensure `versions.yml` on the default branch reflects the pin you want.
 2. Actions → **Build E2B dist** → **Run workflow** (`workflow_dispatch`).
-3. When green, the workflow creates/updates GitHub Release `e2b-<e2b_dist_version>`
-   with the three assets listed above.
+3. When green, the workflow creates GitHub Release `e2b-<e2b_dist_version>` with
+   the four assets listed above. Existing tags are rejected.
 
 Ordinary pushes and PRs build and validate only; they never publish.
 

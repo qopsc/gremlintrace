@@ -7,8 +7,9 @@ usage() {
   cat <<'EOF'
 Usage: mirror-e2b-artifacts.sh [--versions FILE] [--out DIR]
 
-Downloads upstream artifacts into <out>/<kind>/<ver>/amd64/<file>, verifies busybox
-against the published .sha256, and writes artifacts-SHA256SUMS for Ansible.
+Downloads upstream artifacts into <out>/<kind>/<ver>/amd64/<file>, verifies every
+binary against the SHA-256 pins in versions.yml (and busybox against its published
+.sha256), and writes artifacts-SHA256SUMS for Ansible.
 EOF
 }
 
@@ -16,7 +17,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSIONS_FILE="${REPO_ROOT}/versions.yml"
 OUT_DIR="${REPO_ROOT}/artifacts"
 BASE_URL="https://storage.googleapis.com/e2b-artifact-binaries"
-SUCCESS=false
+STAGE_DIR=""
 
 yaml_get() {
   python3 "${REPO_ROOT}/ci/yaml_versions.py" get "$1" "${VERSIONS_FILE}"
@@ -28,8 +29,8 @@ die() {
 }
 
 cleanup() {
-  if [[ "${SUCCESS}" != true && -n "${OUT_DIR:-}" && -d "${OUT_DIR}" ]]; then
-    rm -rf "${OUT_DIR}"
+  if [[ -n "${STAGE_DIR}" && -d "${STAGE_DIR}" ]]; then
+    rm -rf "${STAGE_DIR}"
   fi
 }
 
@@ -71,10 +72,22 @@ trap cleanup EXIT
 FC_VER="$(yaml_get firecracker_version)"
 KERNEL_VER="$(yaml_get kernel_version)"
 BUSYBOX_VER="$(yaml_get busybox_version)"
+FC_SHA256="$(yaml_get firecracker_sha256)"
+KERNEL_SHA256="$(yaml_get kernel_sha256)"
+BUSYBOX_SHA256="$(yaml_get busybox_sha256)"
 
-FC_DIR="${OUT_DIR}/firecrackers/${FC_VER}/amd64"
-KERNEL_DIR="${OUT_DIR}/kernels/${KERNEL_VER}/amd64"
-BUSYBOX_DIR="${OUT_DIR}/busybox/${BUSYBOX_VER}/amd64"
+for pin in "${FC_SHA256}" "${KERNEL_SHA256}" "${BUSYBOX_SHA256}"; do
+  [[ "${pin}" =~ ^[0-9a-f]{64}$ ]] || die "invalid artifact SHA-256 pin: ${pin}"
+done
+
+OUT_PARENT="$(dirname "${OUT_DIR}")"
+mkdir -p "${OUT_PARENT}"
+STAGE_DIR="$(mktemp -d "${OUT_DIR}.partial.XXXXXX")"
+trap cleanup EXIT
+
+FC_DIR="${STAGE_DIR}/firecrackers/${FC_VER}/amd64"
+KERNEL_DIR="${STAGE_DIR}/kernels/${KERNEL_VER}/amd64"
+BUSYBOX_DIR="${STAGE_DIR}/busybox/${BUSYBOX_VER}/amd64"
 
 mkdir -p "${FC_DIR}" "${KERNEL_DIR}" "${BUSYBOX_DIR}"
 
@@ -90,23 +103,40 @@ fetch "${BASE_URL}/busybox/${BUSYBOX_VER}/amd64/busybox.sha256" "${BUSYBOX_SHA_P
 
 chmod 0755 "${FC_PATH}" "${KERNEL_PATH}" "${BUSYBOX_PATH}"
 
+verify_sha256() {
+  local path="$1"
+  local expected="$2"
+  local label="$3"
+  local actual
+  actual="$(sha256sum "${path}" | awk '{print $1}')"
+  [[ "${actual}" == "${expected}" ]] || die "${label} checksum mismatch: expected ${expected}, got ${actual}"
+}
+
+verify_sha256 "${FC_PATH}" "${FC_SHA256}" "firecracker/${FC_VER}"
+verify_sha256 "${KERNEL_PATH}" "${KERNEL_SHA256}" "kernel/${KERNEL_VER}"
+
 (
   cd "${BUSYBOX_DIR}"
   sha256sum -c busybox.sha256
 )
+verify_sha256 "${BUSYBOX_PATH}" "${BUSYBOX_SHA256}" "busybox/${BUSYBOX_VER}"
 
-MANIFEST="${OUT_DIR}/artifacts-SHA256SUMS"
+MANIFEST="${STAGE_DIR}/artifacts-SHA256SUMS"
 {
-  (cd "${OUT_DIR}" && sha256sum "firecrackers/${FC_VER}/amd64/firecracker")
-  (cd "${OUT_DIR}" && sha256sum "kernels/${KERNEL_VER}/amd64/vmlinux.bin")
-  (cd "${OUT_DIR}" && sha256sum "busybox/${BUSYBOX_VER}/amd64/busybox")
+  printf '%s  %s\n' "${FC_SHA256}" "firecrackers/${FC_VER}/amd64/firecracker"
+  printf '%s  %s\n' "${KERNEL_SHA256}" "kernels/${KERNEL_VER}/amd64/vmlinux.bin"
+  printf '%s  %s\n' "${BUSYBOX_SHA256}" "busybox/${BUSYBOX_VER}/amd64/busybox"
 } >"${MANIFEST}"
 
 (
-  cd "${OUT_DIR}"
+  cd "${STAGE_DIR}"
   sha256sum -c artifacts-SHA256SUMS
 )
 
-SUCCESS=true
-trap - EXIT
+mkdir -p "${OUT_DIR}"
+cp -a "${STAGE_DIR}/firecrackers" "${OUT_DIR}/"
+cp -a "${STAGE_DIR}/kernels" "${OUT_DIR}/"
+cp -a "${STAGE_DIR}/busybox" "${OUT_DIR}/"
+cp "${MANIFEST}" "${OUT_DIR}/artifacts-SHA256SUMS"
+
 printf 'mirror-e2b-artifacts: ok -> %s\n' "${OUT_DIR}"

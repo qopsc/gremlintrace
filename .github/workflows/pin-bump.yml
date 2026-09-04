@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -21,6 +22,7 @@ jobs:
       # A dist bump that changes envd/kernel/Firecracker pins requires template rebuilds;
       # upgrade.yml (later task) gates that on env_builds.envd_version.
       - name: Open pull request
+        id: cpr
         # peter-evans/create-pull-request v7.0.8
         uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e
         with:
@@ -30,12 +32,28 @@ jobs:
             Automated monthly pin bump from `e2b-dev/infra` HEAD.
 
             - Updates `versions.yml` (`e2b_pin`, `e2b_dist_version`, `e2b_go_version`,
-              `envd_version`, `goose_version`)
+              `envd_version`, `goose_version`, Firecracker/kernel/busybox versions,
+              and their SHA-256 pins)
             - Syncs `e2b/e2b.pin`
 
             `e2b_go_version` is set from upstream `go.work` so `build.sh` toolchain
-            validation passes. A Go minor bump needs the installer matrix re-run.
+            validation passes. The workflow dispatches the E2B build and lint checks
+            on this branch; if the installer matrix is present, it dispatches that too.
 
-            Merge only after `build-e2b` and the installer matrix are green on this PR.
+            Merge only after all dispatched checks are green on this PR.
           branch: automation/bump-e2b-pin
           delete-branch: true
+      - name: Dispatch validation workflows for the generated branch
+        if: steps.cpr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ref=automation/bump-e2b-pin
+          for workflow in build-e2b.yml lint.yml installer-matrix.yml; do
+            if ! gh workflow view "${workflow}" >/dev/null 2>&1; then
+              echo "validation workflow not available: ${workflow}"
+              continue
+            fi
+            gh workflow run "${workflow}" --ref "${ref}"
+          done

@@ -25,6 +25,7 @@ import yaml
 required = [
     'e2b_pin', 'e2b_dist_version', 'e2b_go_version',
     'firecracker_version', 'kernel_version', 'busybox_version', 'envd_version',
+    'firecracker_sha256', 'kernel_sha256', 'busybox_sha256',
     'e2b_postgres_image', 'e2b_postgres_tag',
     'e2b_redis_image', 'e2b_redis_tag',
     'e2b_clickhouse_image', 'e2b_clickhouse_tag',

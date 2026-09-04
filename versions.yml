@@ -15,6 +15,9 @@ e2b_go_version: "1.26.6"
 firecracker_version: "v1.14-0.2.0"
 kernel_version: "vmlinux-6.1.158-c1a568c"
 busybox_version: "1.36.1"
+firecracker_sha256: "ef22aec7cbffcf6cc44a8436a4db79f9e6fe5c52218c81af321dd20f10ad6e5d"
+kernel_sha256: "1982f8d5f1bc1680a36b0cdf126f605834b1633bba200d3281bccd53b86ff9ee"
+busybox_sha256: "d7cce939adb09a41a22a5f846d22ba8d576b38dbb2b46a5c77a3a3e27ec52520"
 
 # From upstream packages/envd/pkg/version.go at e2b_pin (also stamped into BUILD_INFO by the build pipeline).
 envd_version: "0.7.0"
@@ -62,9 +65,6 @@ ansible_core_version: "2.21.3"
 ansible_lint_version: "26.8.0"
 yamllint_version: "1.38.0"
 
-# Required directly by ci/check_workflow_job_deps.py. Build and mirror jobs
-# deliberately have no PyYAML dependency; ci/yaml_versions.py is stdlib-only.
-pyyaml_version: "6.0.1"
 shellcheck_apt_version: "0.9.0-1"
 bats_apt_version: "1.10.0-1"
 node_ci_version: "22.22.2"
