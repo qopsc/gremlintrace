@@ -17,6 +17,7 @@ DISK_PATHS="${DOCTOR_DISK_PATHS:-/var/lib/e2b /orchestrator}"
 SMOKE_CMD="${DOCTOR_E2B_SMOKE_CMD:-/usr/local/lib/qops/e2b-smoke.sh}"
 WORKER_LOGS_CMD="${DOCTOR_WORKER_LOGS_CMD:-}"
 WEBHOOK_EXTERNAL_CMD="${DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD:-}"
+WEBHOOK_URL="${DOCTOR_WEBHOOK_URL:-}"
 KODUS_WEB_HEALTH="${DOCTOR_KODUS_WEB_HEALTH:-http://127.0.0.1:3000/health}"
 KODUS_API_HEALTH="${DOCTOR_KODUS_API_HEALTH:-http://127.0.0.1:3001/health}"
 KODUS_WEBHOOKS_HEALTH="${DOCTOR_KODUS_WEBHOOKS_HEALTH:-http://127.0.0.1:3332/health}"
@@ -466,8 +467,8 @@ PY
 check_webhook() {
   if [[ -z "${WEBHOOK_EXTERNAL_CMD}" ]]; then
     add_check "webhook_reachability" "Webhook reachability" false \
-      "Skipped: no external webhook probe configured; inbound reachability is unverified." \
-      "{}" true
+      "No external webhook probe configured for ${WEBHOOK_URL:-the webhook endpoint}; inbound reachability is unverified." \
+      "{}"
     return
   fi
   local out rc

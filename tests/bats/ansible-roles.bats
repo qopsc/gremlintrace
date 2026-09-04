@@ -78,7 +78,7 @@ assert isinstance(report["checks"], list)
 assert isinstance(report["failures"], list)
 assert len(report["failures"]) >= 3
 failed_ids = {c["id"] for c in report["checks"] if not c["passed"]}
-for expected in ("resources", "glibc", "kernel_nbd", "egress"):
+for expected in ("resources", "glibc", "kernel_nbd", "egress", "isolation_targets", "webhook_probe_config"):
     assert expected in failed_ids, expected
 print("ok")
 PY

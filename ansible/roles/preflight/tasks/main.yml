@@ -59,6 +59,10 @@
     PREFLIGHT_EGRESS_URLS: >-
       {{ (preflight_egress_urls_debian if ansible_os_family == 'Debian'
           else preflight_egress_urls_fedora) | join('|') }}
+    PREFLIGHT_QOPS_PUBLIC_IPV4: "{{ preflight_host_public_ip }}"
+    PREFLIGHT_QOPS_LAN_IPV4: "{{ preflight_lan_ip }}"
+    PREFLIGHT_WEBHOOK_EXTERNAL_PROBE_CMD: "{{ preflight_webhook_external_probe_cmd }}"
+    PREFLIGHT_MEMINFO: "{{ preflight_meminfo }}"
   register: preflight_run
   changed_when: false
   failed_when: false

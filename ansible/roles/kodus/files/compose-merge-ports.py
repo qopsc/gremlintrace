@@ -241,6 +241,8 @@ def canonical_config(services: dict[str, dict]) -> str:
                 for p in (svc.get("ports") or [])
             ],
             "restart": svc.get("restart"),
+            "volumes": svc.get("volumes"),
+            "environment": svc.get("environment"),
             "extra_hosts": svc.get("extra_hosts"),
         }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))

@@ -117,7 +117,12 @@ PY
   [ "${tag}" != "latest" ]
   [ -n "${tag}" ]
   ! grep -q '^E2B_PROXY_HOST=' "${envf}"
-  [ "$(stat -c '%a' "${envf}")" = "600" ]
+  if stat -c '%a' "${envf}" >/dev/null 2>&1; then
+    mode="$(stat -c '%a' "${envf}")"
+  else
+    mode="$(stat -f '%Lp' "${envf}")"
+  fi
+  [ "${mode}" = "600" ]
 }
 
 @test "renderer refuses IMAGE_TAG=latest" {
@@ -308,6 +313,51 @@ EOF
     bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
   [ "$status" -ne 0 ]
   [ ! -s "${WORKDIR}/persist/install.digest" ] || [ "$(cat "${WORKDIR}/persist/install.digest")" = "" ]
+}
+
+@test "compose desired-state digest includes CA environment and volumes" {
+  render_env
+  run python3 - "${REPO_ROOT}" "${WORKDIR}" "${MERGE_PY}" <<'PY'
+import pathlib, subprocess, sys, yaml
+
+root = pathlib.Path(sys.argv[1])
+workdir = pathlib.Path(sys.argv[2])
+merge_py = pathlib.Path(sys.argv[3])
+merged = {}
+for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+    merged.update(yaml.safe_load(path.read_text()) or {})
+for role in (
+    "preflight", "common", "host_firewall", "docker", "e2b_host",
+    "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor",
+):
+    defaults = root / f"ansible/roles/{role}/defaults/main.yml"
+    if defaults.is_file():
+        merged.update(yaml.safe_load(defaults.read_text()) or {})
+
+digests = []
+for name, tls_mode, ca_path in (("plain", "acme_dns", ""), ("ca", "internal_ca", "/etc/qops/ca.pem")):
+    values = dict(merged, tls_mode=tls_mode, tls_ca_path=ca_path)
+    vars_file = workdir / f"digest-{name}.yml"
+    override_file = workdir / f"override-{name}.yml"
+    vars_file.write_text(yaml.safe_dump(values))
+    override_file.write_text(subprocess.check_output(
+        ["bash", str(root / "tests/fixtures/render-template.sh"),
+         "ansible/roles/kodus/templates/docker-compose.override.yml.j2", str(vars_file)],
+        text=True, cwd=root,
+    ))
+    digest = subprocess.check_output(
+        ["python3", str(merge_py), "digest",
+         "--base", str(workdir / "installer/docker-compose.yml"),
+         "--override", str(override_file),
+         "--env-file", str(workdir / "installer/.env"), "--ref", "test"],
+        text=True, cwd=root,
+    ).strip()
+    digests.append(digest)
+assert digests[0] != digests[1], digests
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }
 
 @test "merged compose config rebinds every upstream published port to 127.0.0.1" {
@@ -653,6 +703,18 @@ PY
   ! grep -q '^E2B_SANDBOX_URL=' "${WORKDIR}/installer/.env.nofallback"
 }
 
+@test "hairpin fallback is opt-in in shipped defaults" {
+  python3 - "${REPO_ROOT}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+group = yaml.safe_load((root / "ansible/group_vars/all.yml").read_text())
+defaults = yaml.safe_load((root / "ansible/roles/kodus/defaults/main.yml").read_text())
+assert group["kodus_extra_hosts_hairpin"] is False, group
+assert defaults["kodus_extra_hosts_hairpin"] is False, defaults
+print("ok")
+PY
+}
+
 @test "renderer honors alternate domain bind host and webhook host" {
   python3 - "${WORKDIR}/config.json" "${REPO_ROOT}" <<'PY'
 import json, pathlib, sys, yaml
@@ -740,4 +802,3 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
-

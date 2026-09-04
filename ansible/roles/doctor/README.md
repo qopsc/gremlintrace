@@ -29,9 +29,9 @@ JSON report: `/etc/qops/doctor.json` (same shape as preflight: `version`, `times
 | `rabbitmq_queues` | `rabbitmqctl list_queues` |
 | `e2b_smoke` | Create `kodus-sandbox`, `echo ok`, kill |
 | `isolation_probe` | Distinct public vs LAN targets; host-side listener proof; sandbox deny of `:5008` and LAN; npm allow; `--noproxy '*'` |
-| `webhook_reachability` | External probe command (`doctor_webhook_external_probe_cmd`). Unconfigured → skipped/unverified, never passed |
+| `webhook_reachability` | External probe command (`doctor_webhook_external_probe_cmd`) for `doctor_webhook_url`; missing configuration fails closed |
 | `worker_fallback` | Worker logs must not contain `falling back to default` |
 
-Set `qops_public_ipv4` (globally routable) and `qops_lan_ipv4` (RFC1918, distinct). Empty or equal targets fail the isolation probe.
+Set `qops_public_ipv4` (globally routable) and `qops_lan_ipv4` (RFC1918, distinct). Empty or equal targets fail the isolation probe. Set `doctor_webhook_external_probe_cmd` to a command that probes `doctor_webhook_url` from outside this host; preflight reports a missing command before install and `qops-doctor` fails closed if it is absent.
 
 `doctor.yml` still runs the Traefik hairpin gate in play tasks after this role.

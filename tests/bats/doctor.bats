@@ -115,6 +115,7 @@ pass_env() {
   export DOCTOR_WORKER_LOGS_CMD="${ROOT}/bin/docker logs kodus-worker-prod"
   export DOCTOR_RABBITMQ_QUEUES_CMD="${ROOT}/bin/docker exec rabbitmq-prod rabbitmqctl list_queues"
   export DOCTOR_WEBHOOK_URL="https://kodus-webhooks.example.com/health"
+  export DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD="true"
   export DOCTOR_KODUS_WEB_HEALTH="http://127.0.0.1:3000/health"
   export DOCTOR_KODUS_API_HEALTH="http://127.0.0.1:3001/health"
   export DOCTOR_KODUS_WEBHOOKS_HEALTH="http://127.0.0.1:3332/health"
@@ -148,28 +149,30 @@ for expected in (
 ):
     assert expected in ids, expected
 webhook = next(c for c in r["checks"] if c["id"] == "webhook_reachability")
-assert webhook.get("skipped") is True, webhook
-assert webhook["passed"] is False
+assert webhook.get("skipped") is not True, webhook
+assert webhook["passed"] is True
+print("ok")
+PY
+}
+
+@test "qops-doctor fails closed when the external webhook probe is missing" {
+  pass_env
+  unset DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD
+  run bash "${DOCTOR}"
+  [ "$status" -eq 1 ]
+  python3 - "${ROOT}/doctor.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+webhook = next(c for c in r["checks"] if c["id"] == "webhook_reachability")
+assert webhook["passed"] is False, webhook
+assert webhook.get("skipped") is not True, webhook
+assert any("external webhook probe" in failure.lower() for failure in r["failures"]), r
 print("ok")
 PY
 }
 
 @test "each check can fail individually and is named in the summary" {
   pass_env
-  declare -A flips
-  flips[preflight]=preflight
-  flips[unit_e2b_orchestrator]=unit
-  flips[hugepages]=hugepages
-  flips[nbd_in_use]=nbd_sysfs
-  flips[nbd_ko_newest_kernel]=nbd_ko
-  flips[disk_usage]=disk
-  flips[template_store]=store
-  flips[kodus_web_health]=web
-  flips[rabbitmq_queues]=rabbit
-  flips[e2b_smoke]=smoke
-  flips[isolation_probe]=isolation
-  flips[webhook_reachability]=webhook
-  flips[worker_fallback]=fallback
 
   fail_one() {
     local id="$1" mode="$2"

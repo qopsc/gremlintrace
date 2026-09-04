@@ -62,6 +62,7 @@
     DOCTOR_KODUS_WEB_HEALTH: "{{ doctor_kodus_web_health }}"
     DOCTOR_KODUS_API_HEALTH: "{{ doctor_kodus_api_health }}"
     DOCTOR_KODUS_WEBHOOKS_HEALTH: "{{ doctor_kodus_webhooks_health }}"
+    DOCTOR_WEBHOOK_URL: "{{ doctor_webhook_url }}"
     DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD: "{{ doctor_webhook_external_probe_cmd }}"
     DOCTOR_MODULES_DIR: "{{ doctor_modules_dir }}"
     DOCTOR_NBD_SYSFS: "{{ doctor_nbd_sysfs }}"

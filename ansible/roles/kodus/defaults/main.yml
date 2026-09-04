@@ -51,6 +51,6 @@ kodus_health_delay_seconds: 2
 kodus_llm_provider_model: auto
 kodus_openai_api_key: ""
 kodus_openai_force_base_url: ""
-kodus_extra_hosts_hairpin: true
+kodus_extra_hosts_hairpin: false
 kodus_ca_container_path: /etc/ssl/certs/qops-ca.pem
 kodus_package_git: git
