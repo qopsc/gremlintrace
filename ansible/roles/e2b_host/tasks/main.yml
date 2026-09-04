@@ -1,4 +1,14 @@
 ---
+- name: Ensure qops helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_host
+
 - name: Deploy nbd module configuration
   ansible.builtin.template:
     src: modprobe-nbd.conf.j2
@@ -256,15 +266,43 @@
   tags:
     - e2b_host
 
+- name: Resolve Firecracker artifacts checksum path and URL
+  ansible.builtin.set_fact:
+    e2b_host_fc_artifacts_effective_checksum_path: >-
+      {{ e2b_host_fc_artifacts_checksum_path if (e2b_host_fc_artifacts_checksum_path | length > 0)
+         else (e2b_host_fc_artifacts_archive_path ~ '.sha256') }}
+    e2b_host_fc_artifacts_effective_checksum_url: >-
+      {{ e2b_host_fc_artifacts_checksum_url if (e2b_host_fc_artifacts_checksum_url | length > 0)
+         else (e2b_host_fc_artifacts_effective_url ~ '.sha256'
+               if e2b_host_fc_artifacts_effective_url | length > 0 else '') }}
+  tags:
+    - e2b_host
+
 - name: Download Firecracker artifacts archive
   ansible.builtin.get_url:
     url: "{{ e2b_host_fc_artifacts_effective_url }}"
     dest: "{{ e2b_host_fc_artifacts_archive_path }}"
     mode: "0644"
     force: false
+  register: e2b_host_fc_download
+  failed_when: false
   when:
     - e2b_host_fc_artifacts_local_path | length == 0
     - e2b_host_fc_artifacts_effective_url | length > 0
+  tags:
+    - e2b_host
+
+- name: Download Firecracker artifacts checksum
+  ansible.builtin.get_url:
+    url: "{{ e2b_host_fc_artifacts_effective_checksum_url }}"
+    dest: "{{ e2b_host_fc_artifacts_effective_checksum_path }}"
+    mode: "0644"
+    force: false
+  register: e2b_host_fc_checksum_download
+  failed_when: false
+  when:
+    - e2b_host_fc_artifacts_local_path | length == 0
+    - e2b_host_fc_artifacts_effective_checksum_url | length > 0
   tags:
     - e2b_host
 
@@ -285,6 +323,38 @@
       qops_github_repository (owner/name slug; used with e2b_dist_version from versions.yml
       to build https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/...).
   when: not e2b_host_fc_archive_stat.stat.exists
+  tags:
+    - e2b_host
+
+- name: Check whether Firecracker artifact checksum is available
+  ansible.builtin.stat:
+    path: "{{ e2b_host_fc_artifacts_effective_checksum_path }}"
+  register: e2b_host_fc_checksum_stat
+  tags:
+    - e2b_host
+
+- name: Fail when downloaded Firecracker artifacts checksum is missing
+  ansible.builtin.fail:
+    msg: >-
+      Firecracker artifacts checksum not found at
+      {{ e2b_host_fc_artifacts_effective_checksum_path }}. The release must publish
+      e2b-fc-artifacts-<e2b_dist_version>.tar.gz.sha256 alongside the archive.
+  when:
+    - e2b_host_fc_artifacts_local_path | length == 0
+    - not e2b_host_fc_checksum_stat.stat.exists
+  tags:
+    - e2b_host
+
+- name: Verify Firecracker artifacts archive checksum
+  ansible.builtin.command:
+    argv:
+      - sha256sum
+      - --check
+      - "{{ e2b_host_fc_artifacts_effective_checksum_path | basename }}"
+    chdir: "{{ e2b_host_fc_artifacts_effective_checksum_path | dirname }}"
+  register: e2b_host_fc_archive_checksum
+  changed_when: false
+  when: e2b_host_fc_checksum_stat.stat.exists
   tags:
     - e2b_host
 

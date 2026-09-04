@@ -15,6 +15,8 @@ e2b_host_nbd_max: 4096
 e2b_host_fc_artifacts_local_path: ""
 e2b_host_fc_artifacts_download_url: ""
 e2b_host_fc_artifacts_cache_dir: /var/cache/qops
+e2b_host_fc_artifacts_checksum_path: ""
+e2b_host_fc_artifacts_checksum_url: ""
 
 e2b_host_orchestrator_subdirs:
   - sandbox

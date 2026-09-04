@@ -26,8 +26,6 @@ extensions:
     endpoint: 0.0.0.0:{{ e2b_datastores_otel_health_port }}
 
 exporters:
-  debug:
-    verbosity: detailed
   clickhouse:
     endpoint: tcp://clickhouse:{{ e2b_datastores_clickhouse_native_port }}
     database: {{ e2b_datastores_clickhouse_db }}
@@ -60,11 +58,3 @@ service:
       receivers: [otlp]
       processors: [filter/external_metrics, batch/clickhouse]
       exporters: [clickhouse]
-    traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [debug]
-    logs:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [debug]

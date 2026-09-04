@@ -39,8 +39,6 @@ services:
     image: {{ e2b_clickhouse_image }}:{{ e2b_clickhouse_tag }}
     container_name: e2b-data-clickhouse
     restart: unless-stopped
-    env_file:
-      - {{ common_qops_secrets_file }}
     environment:
       CLICKHOUSE_USER: ${E2B_CLICKHOUSE_USERNAME}
       CLICKHOUSE_PASSWORD: ${E2B_CLICKHOUSE_PASSWORD}
@@ -61,8 +59,9 @@ services:
     container_name: e2b-data-otel-collector
     restart: unless-stopped
     command: ["--config=/etc/otel-collector.yaml"]
-    env_file:
-      - {{ common_qops_secrets_file }}
+    environment:
+      E2B_CLICKHOUSE_USERNAME: ${E2B_CLICKHOUSE_USERNAME}
+      E2B_CLICKHOUSE_PASSWORD: ${E2B_CLICKHOUSE_PASSWORD}
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -72,7 +71,7 @@ services:
       - "{{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_grpc_port }}:4317/tcp"
       - "{{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_health_port }}:13133/tcp"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:13133/healthz"]
+      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otel-collector.yaml"]
       interval: 5s
       timeout: 3s
       retries: 15

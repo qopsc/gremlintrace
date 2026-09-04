@@ -1,4 +1,14 @@
 ---
+- name: Ensure qops helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_datastores
+
 - name: Ensure e2b-data compose directory exists
   ansible.builtin.file:
     path: "{{ item }}"
@@ -28,7 +38,7 @@
     dest: "{{ e2b_datastores_otel_config }}"
     owner: root
     group: root
-    mode: "0600"
+    mode: "0644"
     diff: false
   no_log: true
   tags:

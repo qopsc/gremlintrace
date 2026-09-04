@@ -8,7 +8,7 @@ Docker Compose project **`e2b-data`** for E2B backing services. Every published 
 |---|---|
 | Project name | `e2b-data` (`e2b_datastores_compose_project`) |
 | Compose file | `/etc/qops/e2b-data/docker-compose.yml` |
-| OTel config | `/etc/qops/e2b-data/otel-collector.yaml` (mode `0600`) |
+| OTel config | `/etc/qops/e2b-data/otel-collector.yaml` (mode `0644`; contains no plaintext secrets) |
 
 ## Services and ports (host localhost only)
 
@@ -36,7 +36,9 @@ Phase 0 note: upstream CI creates `pgcrypto` before goose; the spec only require
 
 ## Secrets
 
-Compose services load `/etc/qops/secrets.env` via `env_file`. The otel collector reads ClickHouse credentials from `${env:E2B_CLICKHOUSE_*}`; no plaintext password is written into the rendered config.
+The compose command uses `/etc/qops/secrets.env` as its interpolation env file. Only
+the services that need credentials receive them as explicit environment values; no
+plaintext password is written into the rendered OTel config.
 
 ## ClickHouse TTL (task 7 hook)
 

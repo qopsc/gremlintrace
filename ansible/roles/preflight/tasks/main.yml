@@ -1,4 +1,14 @@
 ---
+- name: Ensure qops helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - preflight
+
 - name: Install preflight runner
   ansible.builtin.copy:
     src: run-preflight.sh

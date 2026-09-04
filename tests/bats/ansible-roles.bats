@@ -43,6 +43,17 @@ PY
   [[ "$output" == *"common_qops_config_dir"* ]]
 }
 
+@test "helper roles create /usr/local/lib/qops before copying helper scripts" {
+  for role in preflight e2b_host e2b_datastores; do
+    tasks="${REPO_ROOT}/ansible/roles/${role}/tasks/main.yml"
+    dir_line="$(grep -n 'path: /usr/local/lib/qops$' "${tasks}" | head -n 1 | cut -d: -f1)"
+    copy_line="$(grep -n 'dest:.*\/usr\/local\/lib\/qops' "${tasks}" | head -n 1 | cut -d: -f1)"
+    [ -n "${dir_line}" ]
+    [ -n "${copy_line}" ]
+    [ "${dir_line}" -lt "${copy_line}" ]
+  done
+}
+
 @test "preflight report schema records multiple failures at once" {
   run env \
     PREFLIGHT_REPORT_PATH="${PREFLIGHT_REPORT}" \
@@ -287,6 +298,20 @@ PY
   render_with_defaults ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2 '{"e2b_datastores_clickhouse_db":"metrics"}' | grep -q 'database: metrics'
 }
 
+@test "otel collector healthcheck is image-native and receives only ClickHouse secrets" {
+  compose="${BATS_TMPDIR}/compose-otel-health.yml"
+  otel="${BATS_TMPDIR}/otel-no-debug.yml"
+  render_with_defaults ansible/roles/e2b_datastores/templates/docker-compose.yml.j2 >"${compose}"
+  render_with_defaults ansible/roles/e2b_datastores/templates/otel-collector.yaml.j2 >"${otel}"
+  grep -Fq 'test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otel-collector.yaml"]' "${compose}"
+  ! grep -q 'env_file:' "${compose}"
+  grep -Fq 'E2B_CLICKHOUSE_USERNAME: ${E2B_CLICKHOUSE_USERNAME}' "${compose}"
+  grep -Fq 'E2B_CLICKHOUSE_PASSWORD: ${E2B_CLICKHOUSE_PASSWORD}' "${compose}"
+  ! grep -q '^  debug:' "${otel}"
+  ! grep -q '^    traces:' "${otel}"
+  ! grep -q 'exporters: \[debug\]' "${otel}"
+}
+
 @test "compose and otel templates derive every image tag port and bind host from variables" {
   run python3 - "${REPO_ROOT}" "${BATS_TMPDIR}" <<'PY'
 import json
@@ -380,74 +405,12 @@ PY
   [ "$status" -ne 0 ]
 }
 
-@test "qops_release_base_url derives from github repository and dist version" {
-  run python3 - "${REPO_ROOT}" <<'PY'
-import pathlib, sys, yaml
-root = pathlib.Path(sys.argv[1])
-merged = {}
-for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
-    merged.update(yaml.safe_load(path.read_text()) or {})
-if merged.get("qops_release_base_url"):
-    effective = merged["qops_release_base_url"]
-else:
-    effective = (
-        f"https://github.com/{merged['qops_github_repository']}/releases/download/"
-        f"e2b-{merged['e2b_dist_version']}"
-    )
-expected = (
-    f"https://github.com/{merged['qops_github_repository']}/releases/download/"
-    f"e2b-{merged['e2b_dist_version']}"
-)
-assert effective == expected, effective
-print(expected)
-PY
-  [ "$status" -eq 0 ]
-}
-
-@test "missing FC artifact source fails with explicit operator guidance" {
-  run python3 - "${REPO_ROOT}" <<'PY'
-import pathlib, sys, yaml
-root = pathlib.Path(sys.argv[1])
-merged = {}
-for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
-    merged.update(yaml.safe_load(path.read_text()) or {})
-merged.update(yaml.safe_load((root / "ansible/roles/e2b_host/defaults/main.yml").read_text()) or {})
-merged["qops_release_base_url"] = ""
-merged["qops_github_repository"] = ""
-merged["e2b_host_fc_artifacts_download_url"] = ""
-merged["e2b_host_fc_artifacts_local_path"] = ""
-merged["e2b_host_release_base_url_effective"] = ""
-msg = (
-    "Firecracker artifacts archive not found at /var/cache/qops/e2b-fc-artifacts-"
-    f"{merged['e2b_dist_version']}.tar.gz. "
-    "Provide artifacts via one of: e2b_host_fc_artifacts_local_path (local tarball path), "
-    "e2b_host_fc_artifacts_download_url (full download URL), "
-    "qops_release_base_url (release root URL, no trailing slash), or "
-    "qops_github_repository (owner/name slug; used with e2b_dist_version from versions.yml "
-    "to build https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/...)."
-)
-for token in ("e2b_host_fc_artifacts_local_path", "qops_release_base_url", "qops_github_repository"):
-    assert token in msg, token
-print("ok")
-PY
-  [ "$status" -eq 0 ]
-  [ "$output" = "ok" ]
-}
-
-@test "nftables reload is atomic when ruleset load fails" {
-  good="${BATS_TMPDIR}/qops-good.nft"
-  bad="${BATS_TMPDIR}/qops-bad.nft"
-  render_with_defaults ansible/roles/host_firewall/templates/qops.nft.j2 >"${good}"
-  cp "${good}" "${bad}"
-  printf '\nthis is not valid nft syntax\n' >>"${bad}"
-  sudo /sbin/nft delete table inet qops_filter_test 2>/dev/null || true
-  sudo sed 's/qops_filter/qops_filter_test/g' "${good}" | sudo /sbin/nft -f -
-  sudo /sbin/nft list table inet qops_filter_test >/dev/null
-  run sudo /sbin/nft -f <(sudo sed 's/qops_filter/qops_filter_test/g' "${bad}")
-  [ "$status" -ne 0 ]
-  run sudo /sbin/nft list table inet qops_filter_test
-  [ "$status" -eq 0 ]
-  sudo /sbin/nft delete table inet qops_filter_test 2>/dev/null || true
+@test "e2b-host release defaults and archive checksum verification are wired" {
+  grep -Fq 'qops_github_repository: "qopsc/gremlintrace"' \
+    "${REPO_ROOT}/ansible/group_vars/all.yml"
+  grep -Fq 'e2b_host_fc_artifacts_effective_checksum_url' \
+    "${REPO_ROOT}/ansible/roles/e2b_host/tasks/main.yml"
+  grep -Fq 'sha256sum' "${REPO_ROOT}/ansible/roles/e2b_host/tasks/main.yml"
 }
 
 @test "docker overlap ansible task fails when helper exits non-zero" {

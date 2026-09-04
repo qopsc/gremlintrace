@@ -40,5 +40,9 @@ Source (first match):
 3. `e2b_host_fc_artifacts_download_url`
 
 `verify-fc-artifacts.sh` checks all three binaries against the archive `SHA256SUMS` before skipping install.
+Release-sourced archives must also have the adjacent
+`e2b-fc-artifacts-<e2b_dist_version>.tar.gz.sha256`; it is downloaded and checked
+before the archive is extracted. Local archives may provide the same sidecar next
+to the archive for equivalent verification.
 
 Implemented in **Task 6** (see `../../../docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md`, Phase 2).
