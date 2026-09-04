@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # Set FORCE_STOP in the orchestrator EnvironmentFile and manage the
 # /orchestrator/force-stop marker that the patched orchestrator consults at
-# shutdown-signal receipt. Rewriting the env file alone cannot affect a
-# running process because FORCE_STOP is parsed at startup.
+# shutdown-signal receipt (FORCE_STOP is parsed once at process start, so
+# rewriting the env file alone does not affect a running process).
+#
+# Interface:
+#   Marker path: ${QOPS_FORCE_STOP_MARKER:-/orchestrator/force-stop}
+#   Empty file, mode 0600, root-owned when created as root.
+#   Presence at SIGTERM => treat as ForceStop=true. Keep FORCE_STOP=true in
+#   the env file so a restart also force-stops. Remove the marker after a
+#   successful stop (or on the subsequent start) so an ordinary later stop
+#   still drains.
 set -euo pipefail
 
 MARKER="${QOPS_FORCE_STOP_MARKER:-/orchestrator/force-stop}"

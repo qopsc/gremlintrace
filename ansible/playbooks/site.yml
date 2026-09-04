@@ -31,7 +31,9 @@
   become: true
   vars_files:
     - ../../versions.yml
-    - ../group_vars/all.yml
+  pre_tasks:
+    - name: Load documented defaults without overriding inventory
+      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
   roles:
     - role: backup
     - role: doctor

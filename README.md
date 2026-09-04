@@ -4,34 +4,34 @@ Repeatable Ansible installer for **[Kodus](https://kodus.io)** (AI code review, 
 
 ## Architecture
 
-Traefik (systemd, the **only** service binding `0.0.0.0:80/443`) terminates TLS and routes `kodus.*`, `api.e2b.*`, and `*.e2b.*` hostnames. Kodus runs in Docker Compose; E2B orchestrator, API, and client-proxy run as host processes with bundled Postgres/Redis/ClickHouse/OTel in Docker on `127.0.0.1`. Sandboxes are Firecracker microVMs on the same node.
+Traefik (systemd) is the **only network-reachable** bind on ports 80/443. E2B Go services hardcode `0.0.0.0` on their own ports and are contained by nftables input-drop. Traefik terminates TLS and routes `kodus.*`, `api.e2b.*`, and `*.e2b.*` hostnames. Kodus runs in Docker Compose; E2B orchestrator, API, and client-proxy run as host processes with bundled Postgres/Redis/ClickHouse/OTel in Docker on `127.0.0.1`. Sandboxes are Firecracker microVMs on the same node.
 
-See the [design spec](docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md) for the full topology.
+See [docs/architecture.md](docs/architecture.md) and the [design spec](docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md).
 
-## What works today (M1 skeleton)
+## Status (M1)
 
-| Verified on this machine | Not yet implemented |
+| Area | State |
 |---|---|
-| `make check` (yamllint, ansible-lint, shellcheck, syntax-check, bats) | Role tasks (all placeholders) |
-| `./bootstrap.sh --syntax-check` / `--check` wiring to Ansible | Actual install against a target host |
-| Inventory-overridable defaults from `group_vars/all.yml` | E2B build pipeline, templates, Traefik, Kodus |
-| Stubbed `bootstrap.sh` flag forwarding and pipx install-path tests | Container-based bootstrap install test (written, **skipped** when Docker absent) |
+| Ansible roles (12) + playbooks | Implemented — see `ansible/roles/*/README.md` |
+| E2B build pipeline + templates | Implemented — `e2b/build/`, `e2b/templates/` |
+| CI: lint, build-e2b, pin-bump | Workflow YAML present; **GitHub execution not verified in this environment** |
+| CI: installer matrix (Ubuntu 24.04) | `.github/workflows/installer-matrix.yml` — requires repo secrets + KVM runner |
+| Phase 0 feasibility spike | **Not executed** — gate checklist in [docs/spike-notes.md](docs/spike-notes.md) |
+| Customer / lab install | **Never run on a real host** |
 
-**Roles are placeholders** — `./bootstrap.sh` (without `--syntax-check`) would invoke Ansible but perform no real provisioning until Tasks 5–11 land.
+Local verification (no Docker/KVM here): `make check`, `actionlint`, `yamllint .`, bats.
 
 ## Quickstart
-
-From a clean checkout on an x86_64 Linux control host:
 
 ```bash
 # Validate playbook wiring (no target host, no provisioning)
 ./bootstrap.sh --syntax-check
 
-# After configuring ansible/inventory/example.yml and implementing roles:
-# ./bootstrap.sh
+# After configuring ansible/inventory/example.yml and group_vars:
+# ./bootstrap.sh --limit <host>
 ```
 
-`bootstrap.sh` can install Ansible via `pipx` when missing (see `tests/bats/bootstrap-install-path.bats`). For lab SSH without host-key prompts: `export ANSIBLE_HOST_KEY_CHECKING=False`.
+See [docs/install.md](docs/install.md) for operator steps.
 
 ## Repository layout
 
@@ -40,24 +40,31 @@ versions.yml          # sole source of version pins
 bootstrap.sh          # entry point
 ansible/              # playbooks, roles, inventory, group_vars
 e2b/                  # pin, patches, build pipeline, templates
-ci/                   # GitHub Actions (added in later tasks)
-docs/                 # operator docs + design spec
+ci/                   # GitHub Actions helpers + matrix scripts
+docs/                 # architecture, install, operations, security
 tests/                # bats + fixtures
 ```
 
 ## Pinning policy
 
-All image tags, git refs, and binary versions live in **`versions.yml`**. Nothing else in the repo may hard-code versions. `kodus_image_tag` is never `latest`. E2B upstream changes go only through `e2b/patches/`. `e2b/e2b.pin` mirrors `e2b_pin` for the build container; `tests/bats/versions.bats` keeps them aligned.
+All image tags, git refs, and binary versions live in **`versions.yml`**. `kodus_image_tag` is never `latest`. E2B upstream changes go only through `e2b/patches/`. `e2b/e2b.pin` mirrors `e2b_pin`; bats keeps them aligned.
 
 ## Development
 
 ```bash
-make check    # lint + bats
+make check    # lint + bats + docs-accuracy
 make lint     # yamllint, ansible-lint, shellcheck, syntax-check
 make test     # bats only
 ```
 
 ## Documentation
 
-- [Design spec](docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md)
-- [docs/](docs/README.md) — install/operations guides (coming in Task 13)
+| Doc | Audience |
+|---|---|
+| [install.md](docs/install.md) | Customer operator |
+| [operations.md](docs/operations.md) | Runbooks |
+| [security.md](docs/security.md) | Threat model and bind policy |
+| [spike-notes.md](docs/spike-notes.md) | Phase 0 gate (unchecked) |
+| [distro-notes/ubuntu-24.04.md](docs/distro-notes/ubuntu-24.04.md) | M1 distro support |
+| [ci/README.md](ci/README.md) | CI workflows |
+| [Design spec](docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md) | Full plan |

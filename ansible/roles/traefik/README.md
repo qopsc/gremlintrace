@@ -1,7 +1,10 @@
 # traefik
 
-Static Traefik binary under systemd. **The only process permitted to bind
-`0.0.0.0`** (entrypoints 80 and 443).
+Static Traefik binary under systemd. Traefik is the **only listener whose
+80/443 are reachable from the network** (the only process we *intend* to
+publish). E2B Go services hardcode `0.0.0.0` and are dropped by the host
+nftables input chain; see `ansible/roles/e2b_services` and
+`docs/architecture.md`.
 
 Executables (`/usr/local/bin`), configs (`/etc/traefik`), and the shared
 cache (`/var/cache/qops`) stay **root-owned**. Only `/var/lib/traefik` is

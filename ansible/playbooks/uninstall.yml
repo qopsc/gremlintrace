@@ -1,5 +1,5 @@
 ---
-# Implemented in Task 11: remove services, nftables, E2B runtime state, and Kodus compose stack.
+# Remove units and E2B runtime leftovers. Data is preserved unless destroy_data.
 - name: Codereviewer uninstall
   hosts: codereviewer
   become: true
@@ -8,9 +8,72 @@
   pre_tasks:
     - name: Load documented defaults without overriding inventory
       ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+    - name: Require an explicit uninstall confirmation
+      ansible.builtin.assert:
+        that:
+          - qops_uninstall_confirm | bool
+        fail_msg: >-
+          Refusing to uninstall. Re-run with -e qops_uninstall_confirm=true.
+          Data is preserved by default; pass -e qops_uninstall_destroy_data=true
+          to also destroy /var/lib/e2b, /orchestrator, /etc/qops, and backups.
+      tags:
+        - always
   tasks:
-    - name: Uninstall placeholder
-      ansible.builtin.debug:
-        msg: "uninstall.yml is implemented in Task 11"
+    - name: Ensure qops lib directory exists
+      ansible.builtin.file:
+        path: /usr/local/lib/qops
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - uninstall
+
+    - name: Install E2B runtime cleanup helper
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../roles/e2b_services/files/e2b-cleanup-runtime.sh"
+        dest: /usr/local/lib/qops/e2b-cleanup-runtime.sh
+        mode: "0755"
+        owner: root
+        group: root
+      tags:
+        - uninstall
+
+    - name: Install uninstall helper
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../roles/backup/files/qops-uninstall.sh"
+        dest: "{{ backup_uninstall_script_path | default('/usr/local/bin/qops-uninstall') }}"
+        mode: "0755"
+        owner: root
+        group: root
+      tags:
+        - uninstall
+
+    - name: Remove software and preserve data
+      ansible.builtin.command:
+        argv:
+          - "{{ backup_uninstall_script_path | default('/usr/local/bin/qops-uninstall') }}"
+          - --confirm
+      environment:
+        QOPS_UNINSTALL_E2B_NFT_TABLES: "{{ e2b_services_nft_tables | default('v2-host-firewall') }}"
+        QOPS_UNINSTALL_CLEANUP: /usr/local/lib/qops/e2b-cleanup-runtime.sh
+      register: qops_uninstall_run
+      changed_when: "'uninstall complete' in qops_uninstall_run.stdout"
+      when: not (qops_uninstall_destroy_data | bool)
+      tags:
+        - uninstall
+
+    - name: Remove software and destroy data
+      ansible.builtin.command:
+        argv:
+          - "{{ backup_uninstall_script_path | default('/usr/local/bin/qops-uninstall') }}"
+          - --confirm
+          - --destroy-data
+      environment:
+        QOPS_UNINSTALL_E2B_NFT_TABLES: "{{ e2b_services_nft_tables | default('v2-host-firewall') }}"
+        QOPS_UNINSTALL_CLEANUP: /usr/local/lib/qops/e2b-cleanup-runtime.sh
+      register: qops_uninstall_run_destroy
+      changed_when: "'uninstall complete' in qops_uninstall_run_destroy.stdout"
+      when: qops_uninstall_destroy_data | bool
       tags:
         - uninstall

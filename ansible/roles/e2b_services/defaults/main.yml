@@ -4,6 +4,8 @@ e2b_services_current_dir: "{{ e2b_services_install_prefix }}/current"
 e2b_services_version_dir: "{{ e2b_services_install_prefix }}/{{ e2b_dist_version }}"
 e2b_services_config_dir: /etc/qops/e2b
 e2b_services_orchestrator_force_stop: false
+# site.yml seeds; upgrade.yml must set this false so the destructive seeder never runs.
+e2b_services_seed_enabled: true
 
 e2b_services_user: e2b
 e2b_services_group: e2b
@@ -56,7 +58,13 @@ e2b_services_volume_token_enabled: false
 e2b_services_max_parallel_memfile_snapshotting: 2
 e2b_services_orchestrator_lock_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}/orchestrator.lock"
 e2b_services_orchestrator_base_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}"
-e2b_services_force_stop_marker: /orchestrator/force-stop
+# Patched orchestrator consults this marker at SIGTERM (FORCE_STOP env is
+# parsed once at process start). upgrade.yml creates it before systemctl stop.
+e2b_services_force_stop_marker: "{{ e2b_services_orchestrator_base_path }}/force-stop"
+e2b_services_force_stop_patch_filename: "{{ e2b_force_stop_patch_filename | default('0001-force-stop-marker.patch') }}"
+e2b_services_force_stop_patch_sha256: >-
+  {{ e2b_force_stop_patch_sha256
+     | default('4da7ddc0c07cbfd67d1afb0f49dcd4106c48f8bc1907e4c353c92b12d2ff2d9c') }}
 e2b_services_template_storage_path: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}/storage"
 e2b_services_build_cache_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}/build"
 e2b_services_host_envd_path: "{{ e2b_services_envd_dest }}"
@@ -73,6 +81,8 @@ e2b_services_dist_local_path: ""
 e2b_services_dist_download_url: ""
 e2b_services_dist_checksum_path: ""
 e2b_services_dist_checksum_url: ""
+e2b_services_dist_archive_path: ""
+e2b_services_dist_effective_url: ""
 e2b_services_dist_cache_dir: /var/cache/qops
 e2b_services_release_base_url_effective: >-
   {{ qops_release_base_url if (qops_release_base_url | default('') | length > 0)

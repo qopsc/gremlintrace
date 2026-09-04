@@ -17,7 +17,7 @@ lint: syntax-check templates-ci
 	shellcheck bootstrap.sh tests/bats/helpers/ansible-playbook tests/fixtures/render-template.sh \
 	tests/fixtures/build-fc-artifacts-fixture.sh tests/fixtures/build-e2b-dist-fixture.sh \
 	tests/fixtures/stub-docker-compose-clickhouse-ttl.sh \
-	e2b/build/build.sh ci/*.sh \
+	e2b/build/build.sh ci/*.sh ci/matrix/*.sh \
 	ansible/roles/preflight/files/run-preflight.sh \
 	ansible/roles/e2b_host/files/*.sh \
 	ansible/roles/e2b_datastores/files/*.sh \
@@ -26,7 +26,13 @@ lint: syntax-check templates-ci
 	ansible/roles/traefik/files/*.sh \
 	ansible/roles/kodus/files/*.sh \
 	ansible/roles/doctor/files/qops-doctor \
-	ansible/roles/doctor/files/*.sh
+	ansible/roles/doctor/files/*.sh \
+	ansible/roles/backup/files/qops-backup \
+	ansible/roles/backup/files/qops-e2b-gc-wrapper \
+	ansible/roles/backup/files/e2b-gc-query.sh \
+	ansible/roles/backup/files/e2b-gc-lock.sh \
+	ansible/roles/backup/files/qops-uninstall.sh \
+	ansible/roles/e2b_services/files/e2b-cleanup-runtime.sh
 	npm --prefix $(TEMPLATES_DIR) run typecheck
 
 syntax-check:
@@ -38,6 +44,7 @@ syntax-check:
 
 test: templates-ci
 	bats tests/bats/
+	python3 ci/check-docs-accuracy.py
 	npm --prefix $(TEMPLATES_DIR) test
 
 check: lint test

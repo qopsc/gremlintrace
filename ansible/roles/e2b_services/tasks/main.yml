@@ -8,26 +8,8 @@
   tags:
     - e2b_services
 
-- name: Install e2b_services helper scripts
-  ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: "/usr/local/lib/qops/{{ item }}"
-    mode: "0755"
-    owner: root
-    group: root
-  loop:
-    - install-e2b-dist.sh
-    - verify-e2b-dist.sh
-    - e2b-read-secret.sh
-    - e2b-set-secret.sh
-    - e2b-psql.sh
-    - e2b-ensure-pg-extensions.sh
-    - e2b-goose-migrate.sh
-    - e2b-seed-if-needed.sh
-    - e2b-apply-limits.sh
-    - e2b-wait-health.sh
-    - e2b-ensure-node-id.sh
-    - e2b-set-force-stop.sh
+- name: Fetch E2B dist archive and install service helpers
+  ansible.builtin.import_tasks: fetch-dist.yml
   tags:
     - e2b_services
 
@@ -77,115 +59,6 @@
   tags:
     - e2b_services
 
-- name: Resolve E2B dist archive path
-  ansible.builtin.set_fact:
-    e2b_services_dist_archive_path: >-
-      {{ e2b_services_dist_local_path if (e2b_services_dist_local_path | length > 0)
-         else (e2b_services_dist_cache_dir ~ '/e2b-' ~ e2b_dist_version ~ '.tar.gz') }}
-  tags:
-    - e2b_services
-
-- name: Resolve E2B dist download URL
-  ansible.builtin.set_fact:
-    e2b_services_dist_effective_url: >-
-      {{ e2b_services_dist_download_url if (e2b_services_dist_download_url | length > 0)
-         else (e2b_services_release_base_url_effective ~ '/e2b-' ~ e2b_dist_version ~ '.tar.gz'
-               if (e2b_services_release_base_url_effective | length > 0
-                   and e2b_services_dist_local_path | length == 0)
-               else '') }}
-  tags:
-    - e2b_services
-
-- name: Resolve E2B dist checksum path and URL
-  ansible.builtin.set_fact:
-    e2b_services_dist_effective_checksum_path: >-
-      {{ e2b_services_dist_checksum_path if (e2b_services_dist_checksum_path | length > 0)
-         else (e2b_services_dist_archive_path ~ '.sha256') }}
-    e2b_services_dist_effective_checksum_url: >-
-      {{ e2b_services_dist_checksum_url if (e2b_services_dist_checksum_url | length > 0)
-         else (e2b_services_dist_effective_url ~ '.sha256'
-               if e2b_services_dist_effective_url | length > 0 else '') }}
-  tags:
-    - e2b_services
-
-- name: Download E2B dist archive
-  ansible.builtin.get_url:
-    url: "{{ e2b_services_dist_effective_url }}"
-    dest: "{{ e2b_services_dist_archive_path }}"
-    mode: "0644"
-    force: false
-  register: e2b_services_dist_download
-  failed_when: false
-  when:
-    - e2b_services_dist_local_path | length == 0
-    - e2b_services_dist_effective_url | length > 0
-  tags:
-    - e2b_services
-
-- name: Download E2B dist checksum
-  ansible.builtin.get_url:
-    url: "{{ e2b_services_dist_effective_checksum_url }}"
-    dest: "{{ e2b_services_dist_effective_checksum_path }}"
-    mode: "0644"
-    force: false
-  register: e2b_services_dist_checksum_download
-  failed_when: false
-  when:
-    - e2b_services_dist_local_path | length == 0
-    - e2b_services_dist_effective_checksum_url | length > 0
-  tags:
-    - e2b_services
-
-- name: Assert E2B dist archive is available
-  ansible.builtin.stat:
-    path: "{{ e2b_services_dist_archive_path }}"
-  register: e2b_services_dist_archive_stat
-  tags:
-    - e2b_services
-
-- name: Fail when E2B dist archive is missing
-  ansible.builtin.fail:
-    msg: >-
-      E2B dist archive not found at {{ e2b_services_dist_archive_path }}.
-      Provide it via e2b_services_dist_local_path, e2b_services_dist_download_url,
-      qops_release_base_url, or qops_github_repository
-      (https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/e2b-<e2b_dist_version>.tar.gz).
-  when: not e2b_services_dist_archive_stat.stat.exists
-  tags:
-    - e2b_services
-
-- name: Check whether E2B dist checksum is available
-  ansible.builtin.stat:
-    path: "{{ e2b_services_dist_effective_checksum_path }}"
-  register: e2b_services_dist_checksum_stat
-  tags:
-    - e2b_services
-
-- name: Fail when downloaded E2B dist checksum is missing
-  ansible.builtin.fail:
-    msg: >-
-      E2B dist checksum not found at {{ e2b_services_dist_effective_checksum_path }}.
-      The release must publish e2b-{{ e2b_dist_version }}.tar.gz.sha256 alongside
-      the dist archive.
-  when:
-    - e2b_services_dist_local_path | length == 0
-    - not e2b_services_dist_checksum_stat.stat.exists
-  tags:
-    - e2b_services
-
-- name: Verify E2B dist archive checksum
-  ansible.builtin.command:
-    argv:
-      - sha256sum
-      - --check
-      - "{{ e2b_services_dist_effective_checksum_path | basename }}"
-    chdir: "{{ e2b_services_dist_effective_checksum_path | dirname }}"
-  register: e2b_services_dist_archive_checksum
-  changed_when: false
-  when: e2b_services_dist_checksum_stat.stat.exists
-  tags:
-    - e2b_services
-
 - name: Verify installed E2B dist
   ansible.builtin.command:
     cmd: >-
@@ -194,6 +67,8 @@
       {{ e2b_services_current_dir }}
       {{ e2b_services_envd_dest }}
       {{ e2b_dist_version }}
+      {{ e2b_services_force_stop_patch_filename }}
+      {{ e2b_services_force_stop_patch_sha256 }}
   register: e2b_services_dist_verify
   changed_when: false
   failed_when: false
@@ -209,6 +84,8 @@
       {{ e2b_services_current_dir }}
       {{ e2b_services_envd_dest }}
       {{ e2b_dist_version }}
+      {{ e2b_services_force_stop_patch_filename }}
+      {{ e2b_services_force_stop_patch_sha256 }}
   when: e2b_services_dist_verify.rc != 0
   register: e2b_services_dist_install
   changed_when: e2b_services_dist_install.rc == 0
@@ -223,6 +100,19 @@
       {{ e2b_services_current_dir }}
       {{ e2b_services_envd_dest }}
       {{ e2b_dist_version }}
+      {{ e2b_services_force_stop_patch_filename }}
+      {{ e2b_services_force_stop_patch_sha256 }}
+  changed_when: false
+  tags:
+    - e2b_services
+
+- name: Fail fast when API binary and migrations are not the same dist
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/e2b-assert-dist-pair.sh
+      --dir {{ e2b_services_version_dir }}
+      --required-patch {{ e2b_services_force_stop_patch_filename }}
+      --required-patch-sha256 {{ e2b_services_force_stop_patch_sha256 }}
   changed_when: false
   tags:
     - e2b_services
@@ -312,6 +202,14 @@
     diff: false
   no_log: true
   notify: Restart e2b-orchestrator
+  tags:
+    - e2b_services
+
+- name: Remove force-stop marker on ordinary start so later stops drain
+  ansible.builtin.file:
+    path: "{{ e2b_services_force_stop_marker }}"
+    state: absent
+  when: not (e2b_services_orchestrator_force_stop | bool)
   tags:
     - e2b_services
 
@@ -416,6 +314,7 @@
   register: e2b_services_seed
   changed_when: (e2b_services_seed.stdout | trim) == "seeded"
   no_log: true
+  when: e2b_services_seed_enabled | bool
   tags:
     - e2b_services
 

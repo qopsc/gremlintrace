@@ -15,6 +15,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSIONS_FILE="${REPO_ROOT}/versions.yml"
 TARBALL=""
 
+# Shared with e2b-assert-dist-pair.sh (fail closed on zero or multiple 14-digit matches).
+# shellcheck disable=SC1091
+# shellcheck source=../ansible/roles/e2b_services/files/e2b-extract-api-migration-timestamp.sh
+source "${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-extract-api-migration-timestamp.sh"
+
 yaml_get() {
   python3 "${REPO_ROOT}/ci/yaml_versions.py" get "$1" "${VERSIONS_FILE}"
 }
@@ -47,23 +52,6 @@ newest_migration_timestamp() {
   local migdir="$1"
   # shellcheck disable=SC2012
   ls "${migdir}" | sed 's/_.*//' | sort | tail -n 1
-}
-
-# The API embeds expectedMigrationTimestamp via -X=main.expectedMigrationTimestamp at link time.
-extract_api_migration_timestamp() {
-  local bin="$1"
-  local -a matches=()
-  local line
-  while IFS= read -r line; do
-    matches+=("${line}")
-  done < <(strings -a "${bin}" | grep -E '^[0-9]{14}$' | LC_ALL=C sort -u)
-  if (( ${#matches[@]} != 1 )); then
-    if (( ${#matches[@]} == 0 )); then
-      die "could not extract expectedMigrationTimestamp from api binary (no 14-digit string)"
-    fi
-    die "ambiguous expectedMigrationTimestamp in api binary: ${matches[*]}"
-  fi
-  printf '%s\n' "${matches[0]}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -100,6 +88,10 @@ tar -xzf "${TARBALL}" -C "${WORK}"
 )
 
 [[ -f "${WORK}/BUILD_INFO" ]] || die "BUILD_INFO missing"
+
+expected_patch_name="$(yaml_get e2b_force_stop_patch_filename)"
+expected_patch_sha256="$(yaml_get e2b_force_stop_patch_sha256)"
+python3 "${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-verify-build-patches.py" "${WORK}/BUILD_INFO" "${expected_patch_name}" "${expected_patch_sha256}" || die "BUILD_INFO does not contain the required force-stop patch"
 
 for bin in orchestrator api client-proxy envd e2b-seed goose; do
   [[ -x "${WORK}/bin/${bin}" ]] || die "missing or non-executable: bin/${bin}"

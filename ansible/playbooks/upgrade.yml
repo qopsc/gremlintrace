@@ -1,16 +1,189 @@
 ---
-# Implemented in Task 11: backup → pin bump → FORCE_STOP → migrate → templates → doctor.
+# backup → fetch dist → FORCE_STOP → migrate → templates (pin change) → doctor
 - name: Codereviewer upgrade
   hosts: codereviewer
   become: true
   vars_files:
     - ../../versions.yml
+  vars:
+    e2b_services_seed_enabled: false
+    e2b_upgrade_new_build_info: /var/cache/qops/upgrade-BUILD_INFO
   pre_tasks:
     - name: Load documented defaults without overriding inventory
       ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+    - name: Verify operator and pin variables resolve from vars_files
+      ansible.builtin.assert:
+        that:
+          - kodus_image_tag is defined
+          - kodus_image_tag | length > 0
+          - kodus_image_tag != "latest"
+          - e2b_dist_version is defined
+          - firecracker_version is defined
+          - kernel_version is defined
+          - envd_version is defined
+        fail_msg: >-
+          vars_files did not load versions.yml (kodus_image_tag must be pinned,
+          never latest)
+      tags:
+        - always
+
+    - name: Fail when E2B storage backend is not local
+      ansible.builtin.fail:
+        msg: >-
+          e2b_storage_backend={{ e2b_storage_backend }} is not supported in M1.
+      when: e2b_storage_backend != "local"
+      tags:
+        - always
+  roles:
+    - role: backup
   tasks:
-    - name: Upgrade placeholder
+    - name: Take an M1 backup before changing the running cluster
+      ansible.builtin.command:
+        cmd: "{{ backup_script_path }}"
+      register: e2b_upgrade_backup
+      changed_when: (e2b_upgrade_backup.stdout | trim).startswith('ok ')
+      tags:
+        - upgrade
+
+    - name: Verify the backup bundle is usable (not merely that backup exited 0)
+      ansible.builtin.command:
+        cmd: "{{ backup_verify_script_path }} {{ backup_root }}/latest"
+      changed_when: false
+      tags:
+        - upgrade
+
+    - name: Fetch the new E2B dist archive
+      ansible.builtin.include_role:
+        name: e2b_services
+        tasks_from: fetch-dist.yml
+        public: true
+      tags:
+        - upgrade
+
+    - name: Extract BUILD_INFO from the new dist archive
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/lib/qops/e2b-extract-build-info.sh
+          {{ e2b_services_dist_archive_path }}
+          {{ e2b_upgrade_new_build_info }}
+      changed_when: false
+      tags:
+        - upgrade
+
+    - name: Fail fast when the new dist API/migration pair does not match
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/lib/qops/e2b-assert-dist-pair.sh
+          --archive {{ e2b_services_dist_archive_path }}
+          --required-patch {{ e2b_services_force_stop_patch_filename }}
+          --required-patch-sha256 {{ e2b_services_force_stop_patch_sha256 }}
+      changed_when: false
+      tags:
+        - upgrade
+
+    - name: Require an installed BUILD_INFO to compare pins against
+      ansible.builtin.stat:
+        path: "{{ e2b_services_current_dir }}/BUILD_INFO"
+      register: e2b_upgrade_installed_build_info
+      tags:
+        - upgrade
+
+    - name: Fail when no installed dist is present
+      ansible.builtin.fail:
+        msg: >-
+          No installed E2B dist at {{ e2b_services_current_dir }}/BUILD_INFO.
+          Run site.yml before upgrade.yml.
+      when: not e2b_upgrade_installed_build_info.stat.exists
+      tags:
+        - upgrade
+
+    - name: Require the installed E2B dist to contain the force-stop patch
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /usr/local/lib/qops/e2b-verify-build-patches.py
+          - "{{ e2b_services_current_dir }}/BUILD_INFO"
+          - "{{ e2b_services_force_stop_patch_filename }}"
+          - "{{ e2b_services_force_stop_patch_sha256 }}"
+      changed_when: false
+      tags:
+        - upgrade
+
+    - name: Compare installed BUILD_INFO against the new dist pins
+      ansible.builtin.command:
+        cmd: >-
+          python3 /usr/local/lib/qops/e2b-compare-upgrade-pins.py
+          --installed-build-info {{ e2b_services_current_dir }}/BUILD_INFO
+          --new-build-info {{ e2b_upgrade_new_build_info }}
+          --installed-env {{ e2b_services_orchestrator_env }}
+          --new-firecracker {{ firecracker_version }}
+          --new-kernel {{ kernel_version }}
+      register: e2b_upgrade_pins
+      changed_when: false
+      tags:
+        - upgrade
+
+    - name: Record whether templates must be rebuilt
+      ansible.builtin.set_fact:
+        e2b_upgrade_rebuild_templates: "{{ (e2b_upgrade_pins.stdout | from_json).rebuild_templates }}"
+        e2b_upgrade_pin_changed: "{{ (e2b_upgrade_pins.stdout | from_json).changed }}"
+      tags:
+        - upgrade
+
+    - name: Show template rebuild decision
       ansible.builtin.debug:
-        msg: "upgrade.yml is implemented in Task 11"
+        msg: >-
+          rebuild_templates={{ e2b_upgrade_rebuild_templates }}
+          changed_keys={{ e2b_upgrade_pin_changed }}
+          (rebuild keys: envd_version, firecracker_version, kernel_version)
+      tags:
+        - upgrade
+
+    - name: Set FORCE_STOP=true and stop E2B units
+      ansible.builtin.include_role:
+        name: e2b_services
+        tasks_from: force-stop.yml
+      tags:
+        - upgrade
+
+    - name: Install Firecracker, kernel, and busybox artifacts for the new pins
+      ansible.builtin.include_role:
+        name: e2b_host
+      tags:
+        - upgrade
+
+    - name: Apply E2B datastore image pins
+      ansible.builtin.include_role:
+        name: e2b_datastores
+      tags:
+        - upgrade
+
+    - name: Install the new dist, migrate, and start E2B (seeder disabled)
+      ansible.builtin.include_role:
+        name: e2b_services
+      vars:
+        e2b_services_seed_enabled: false
+        e2b_services_orchestrator_force_stop: false
+      tags:
+        - upgrade
+
+    - name: Rebuild templates when envd, kernel, or Firecracker pins changed
+      ansible.builtin.include_role:
+        name: e2b_templates
+      vars:
+        e2b_templates_force: true
+      when: e2b_upgrade_rebuild_templates | bool
+      tags:
+        - upgrade
+
+    - name: Upgrade Kodus to the pinned IMAGE_TAG
+      ansible.builtin.include_role:
+        name: kodus
+      tags:
+        - upgrade
+
+    - name: Run qops-doctor after upgrade
+      ansible.builtin.include_role:
+        name: doctor
       tags:
         - upgrade

@@ -67,7 +67,11 @@ build_fixture_tarball() {
 {
   "e2b_pin": "${pin}",
   "expected_migration_timestamp": "${build_info_ts}",
-  "clean_nfs_cache": false
+  "clean_nfs_cache": false,
+  "patches": [{
+    "filename": "0001-force-stop-marker.patch",
+    "sha256": "4da7ddc0c07cbfd67d1afb0f49dcd4106c48f8bc1907e4c353c92b12d2ff2d9c"
+  }]
 }
 EOF
 
@@ -111,7 +115,7 @@ EOF
     chmod +x "${stage}/bin/${bin}"
   done
   cat >"${stage}/BUILD_INFO" <<EOF
-{"e2b_pin":"${pin}","expected_migration_timestamp":"20240101120000","clean_nfs_cache":false}
+{"e2b_pin":"${pin}","expected_migration_timestamp":"20240101120000","clean_nfs_cache":false,"patches":[{"filename":"0001-force-stop-marker.patch","sha256":"4da7ddc0c07cbfd67d1afb0f49dcd4106c48f8bc1907e4c353c92b12d2ff2d9c"}]}
 EOF
   (cd "${stage}" && find . -type f ! -name SHA256SUMS -printf '%P\n' | while read -r f; do sha256sum "${f}"; done) >"${stage}/SHA256SUMS"
   tar -C "${stage}" -czf "${tarball}" .
