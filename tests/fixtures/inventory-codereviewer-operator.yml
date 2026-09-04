@@ -1,0 +1,10 @@
+---
+# Local inventory fixture proving inventory values override documented defaults.
+all:
+  children:
+    codereviewer:
+      hosts:
+        localhost:
+          ansible_connection: local
+          qops_domain: customer.example.net
+          tls_mode: provided

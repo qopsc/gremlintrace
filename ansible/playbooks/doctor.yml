@@ -4,19 +4,27 @@
   become: true
   vars_files:
     - ../../versions.yml
-    - ../group_vars/all.yml
   pre_tasks:
-    - name: Verify operator and pin variables resolve from vars_files
+    - name: Load documented defaults without overriding inventory
+      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+    - name: Verify operator and pin variables resolve
       ansible.builtin.assert:
         that:
+          - qops_domain is defined
           - tls_mode is defined
           - tls_mode in ['acme_dns', 'provided', 'internal_ca']
           - kodus_image_tag is defined
           - kodus_image_tag != 'latest'
         fail_msg: >-
-          vars_files did not load group_vars/all.yml and/or versions.yml
-          (tls_mode={{ tls_mode | default('UNDEF') }},
+          documented defaults and/or versions.yml did not load, or an operator
+          variable is invalid
+          (qops_domain={{ qops_domain | default('UNDEF') }},
+          tls_mode={{ tls_mode | default('UNDEF') }},
           kodus_image_tag={{ kodus_image_tag | default('UNDEF') }})
+        success_msg: >-
+          operator and pin variables resolved
+          (qops_domain={{ qops_domain }}, tls_mode={{ tls_mode }},
+          kodus_image_tag={{ kodus_image_tag }})
       tags:
         - always
   roles:

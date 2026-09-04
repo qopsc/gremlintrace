@@ -2,7 +2,10 @@
 # Shared helpers for bootstrap.bats
 
 read_recorded_argv() {
-  mapfile -t RECORDED_ARGV <"${BOOTSTRAP_STUB_LOG}"
+  RECORDED_ARGV=()
+  while IFS= read -r recorded_arg; do
+    RECORDED_ARGV[${#RECORDED_ARGV[@]}]="${recorded_arg}"
+  done <"${BOOTSTRAP_STUB_LOG}"
 }
 
 assert_argv_equals() {

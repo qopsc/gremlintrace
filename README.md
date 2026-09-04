@@ -14,7 +14,7 @@ See the [design spec](docs/superpowers/specs/2026-08-28-kodus-e2b-selfhost-desig
 |---|---|
 | `make check` (yamllint, ansible-lint, shellcheck, syntax-check, bats) | Role tasks (all placeholders) |
 | `./bootstrap.sh --syntax-check` / `--check` wiring to Ansible | Actual install against a target host |
-| `group_vars/all.yml` loaded via explicit `vars_files` | E2B build pipeline, templates, Traefik, Kodus |
+| Inventory-overridable defaults from `group_vars/all.yml` | E2B build pipeline, templates, Traefik, Kodus |
 | Stubbed `bootstrap.sh` flag forwarding and pipx install-path tests | Container-based bootstrap install test (written, **skipped** when Docker absent) |
 
 **Roles are placeholders** — `./bootstrap.sh` (without `--syntax-check`) would invoke Ansible but perform no real provisioning until Tasks 5–11 land.

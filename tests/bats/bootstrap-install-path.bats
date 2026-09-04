@@ -81,7 +81,10 @@ run_bootstrap() {
 
 assert_order_equals() {
   local -a expected=("$@")
-  mapfile -t actual <"${BOOTSTRAP_ORDER_LOG}"
+  local -a actual=()
+  while IFS= read -r order_entry; do
+    actual[${#actual[@]}]="${order_entry}"
+  done <"${BOOTSTRAP_ORDER_LOG}"
   if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
     echo "order length mismatch: got ${#actual[@]} want ${#expected[@]}" >&2
     printf '  got:  %s\n' "${actual[@]}" >&2

@@ -236,9 +236,11 @@ fi
 if [[ "${SYNTAX_CHECK}" == "true" ]]; then
   ANSIBLE_ARGS+=(--syntax-check)
 fi
-for ev in "${EXTRA_VARS[@]}"; do
-  ANSIBLE_ARGS+=(--extra-vars "${ev}")
-done
+if [[ "${#EXTRA_VARS[@]}" -gt 0 ]]; then
+  for ev in "${EXTRA_VARS[@]}"; do
+    ANSIBLE_ARGS+=(--extra-vars "${ev}")
+  done
+fi
 
 log "exec: ${ANSIBLE_ARGS[*]}"
 exec "${ANSIBLE_ARGS[@]}"

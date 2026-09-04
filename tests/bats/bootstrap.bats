@@ -14,6 +14,16 @@ setup() {
   cp "${BATS_TEST_DIRNAME}/helpers/ansible-playbook" "${STUB_BIN}/ansible-playbook"
   chmod +x "${STUB_BIN}/ansible-playbook"
 
+  # Exercise the Linux-only entry point consistently on the macOS control host.
+  cat >"${STUB_BIN}/uname" <<'EOF'
+#!/bin/bash
+case "${1:-}" in
+  -s) echo Linux ;;
+  -m) echo x86_64 ;;
+esac
+EOF
+  chmod +x "${STUB_BIN}/uname"
+
   export PATH="${STUB_BIN}:${PATH}"
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   BOOTSTRAP="${REPO_ROOT}/bootstrap.sh"
@@ -38,6 +48,16 @@ teardown() {
 
 @test "default invocation calls ansible-playbook with exact argv" {
   run "${BOOTSTRAP}" --skip-install
+  [ "$status" -eq 0 ]
+  assert_argv_equals \
+    "${STUB_BIN}/ansible-playbook" \
+    "${REPO_ROOT}/ansible/playbooks/site.yml" \
+    "-i" \
+    "${REPO_ROOT}/ansible/inventory/example.yml"
+}
+
+@test "default invocation handles an empty extra-vars array under system Bash" {
+  run /bin/bash "${BOOTSTRAP}" --skip-install
   [ "$status" -eq 0 ]
   assert_argv_equals \
     "${STUB_BIN}/ansible-playbook" \

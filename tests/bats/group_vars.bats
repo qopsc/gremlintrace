@@ -8,11 +8,23 @@ setup() {
   DOCTOR_PLAYBOOK="${REPO_ROOT}/ansible/playbooks/doctor.yml"
 }
 
-@test "doctor.yml --check resolves group_vars and versions via playbook vars_files" {
-  run ansible-playbook --check -i "${INVENTORY}" "${DOCTOR_PLAYBOOK}"
+@test "doctor.yml --check resolves documented defaults and versions" {
+  run ansible-playbook --check -i "${INVENTORY}" "${DOCTOR_PLAYBOOK}" \
+    --extra-vars "ansible_become=false"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Verify operator and pin variables resolve from vars_files"* ]]
-  [[ "$output" == *"All assertions passed"* ]]
+  [[ "$output" == *"operator and pin variables resolved"* ]]
+  [[ "$output" == *"qops_domain=example.com"* ]]
+  [[ "$output" == *"tls_mode=acme_dns"* ]]
+  [[ "$output" != *"FAILED"* ]]
+}
+
+@test "inventory operator values override documented defaults" {
+  OPERATOR_INVENTORY="${REPO_ROOT}/tests/fixtures/inventory-codereviewer-operator.yml"
+  run ansible-playbook --check -i "${OPERATOR_INVENTORY}" "${DOCTOR_PLAYBOOK}" \
+    --extra-vars "ansible_become=false"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"qops_domain=customer.example.net"* ]]
+  [[ "$output" == *"tls_mode=provided"* ]]
   [[ "$output" != *"FAILED"* ]]
 }
 
@@ -24,13 +36,15 @@ setup() {
 
 @test "doctor.yml rejects an out-of-range tls_mode" {
   run ansible-playbook --check -i "${INVENTORY}" "${DOCTOR_PLAYBOOK}" \
+    --extra-vars "ansible_become=false" \
     --extra-vars "tls_mode=bogus"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"vars_files did not load"* ]]
+  [[ "$output" == *"tls_mode=bogus"* ]]
 }
 
 @test "doctor.yml rejects kodus_image_tag=latest" {
   run ansible-playbook --check -i "${INVENTORY}" "${DOCTOR_PLAYBOOK}" \
+    --extra-vars "ansible_become=false" \
     --extra-vars "kodus_image_tag=latest"
   [ "$status" -ne 0 ]
 }

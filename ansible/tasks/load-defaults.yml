@@ -1,0 +1,16 @@
+---
+# Keep operator defaults overridable by inventory and extra vars. Play-level
+# vars_files have higher precedence than inventory, so defaults are loaded
+# privately and promoted one key at a time only when no value already exists.
+- name: Load documented operator defaults
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../group_vars/all.yml"
+    name: qops_documented_defaults
+
+- name: Apply documented defaults only when unset
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ qops_documented_defaults | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: query('ansible.builtin.varnames', '^' ~ item.key ~ '$') | length == 0
