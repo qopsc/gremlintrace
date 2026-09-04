@@ -1,0 +1,82 @@
+name: {{ e2b_datastores_compose_project }}
+
+services:
+  postgres:
+    image: {{ e2b_postgres_image }}:{{ e2b_postgres_tag }}
+    container_name: e2b-data-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: {{ e2b_datastores_postgres_user }}
+      POSTGRES_PASSWORD: ${E2B_POSTGRES_PASSWORD}
+      POSTGRES_DB: {{ e2b_datastores_postgres_db }}
+    ports:
+      - "{{ e2b_datastores_postgres_bind_host }}:{{ e2b_datastores_postgres_port }}:5432/tcp"
+    volumes:
+      - e2b-postgres-data:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ e2b_datastores_postgres_user }}"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  redis:
+    image: {{ e2b_redis_image }}:{{ e2b_redis_tag }}
+    container_name: e2b-data-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "{{ e2b_datastores_redis_bind_host }}:{{ e2b_datastores_redis_port }}:6379/tcp"
+    volumes:
+      - e2b-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  clickhouse:
+    image: {{ e2b_clickhouse_image }}:{{ e2b_clickhouse_tag }}
+    container_name: e2b-data-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: ${E2B_CLICKHOUSE_USERNAME}
+      CLICKHOUSE_PASSWORD: ${E2B_CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: {{ e2b_datastores_clickhouse_db }}
+    ports:
+      - "{{ e2b_datastores_clickhouse_bind_host }}:{{ e2b_datastores_clickhouse_http_port }}:8123/tcp"
+      - "{{ e2b_datastores_clickhouse_bind_host }}:{{ e2b_datastores_clickhouse_native_port }}:9000/tcp"
+    volumes:
+      - e2b-clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  otel-collector:
+    image: {{ e2b_otel_collector_image }}:{{ e2b_otel_collector_tag }}
+    container_name: e2b-data-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector.yaml"]
+    environment:
+      E2B_CLICKHOUSE_USERNAME: ${E2B_CLICKHOUSE_USERNAME}
+      E2B_CLICKHOUSE_PASSWORD: ${E2B_CLICKHOUSE_PASSWORD}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      - "{{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_grpc_port }}:4317/tcp"
+      - "{{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_health_port }}:13133/tcp"
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otel-collector.yaml"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  e2b-postgres-data:
+  e2b-redis-data:
+  e2b-clickhouse-data:

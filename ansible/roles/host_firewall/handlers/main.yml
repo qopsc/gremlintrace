@@ -1,0 +1,6 @@
+---
+- name: Load qops nftables ruleset
+  ansible.builtin.command:
+    cmd: nft -f {{ host_firewall_nftables_config_path }}
+  changed_when: false
+  listen: Load qops nftables ruleset

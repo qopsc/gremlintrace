@@ -1,0 +1,23 @@
+---
+- name: Reload udev rules
+  ansible.builtin.command:
+    cmd: udevadm control --reload-rules
+  changed_when: false
+  listen: Reload udev rules
+
+- name: Trigger udev
+  ansible.builtin.command:
+    cmd: udevadm trigger
+  changed_when: false
+  listen: Reload udev rules
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: Reload systemd
+
+- name: Restart e2b hugepages service
+  ansible.builtin.service:
+    name: "{{ e2b_host_hugepages_service_name }}"
+    state: restarted
+  listen: Restart e2b hugepages service

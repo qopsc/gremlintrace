@@ -1,6 +1,161 @@
 ---
-- name: Placeholder for the common role
-  ansible.builtin.debug:
-    msg: "common role is implemented in task 5"
+- name: Assert M1 installer target distribution
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: >-
+      M1 supports Ubuntu 24.04 (Debian family) only.
+      Fedora 44 support is planned for M2.
+  tags:
+    - common
+
+- name: Install common packages (Debian family)
+  ansible.builtin.apt:
+    name: "{{ common_packages_debian }}"
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+  tags:
+    - common
+
+- name: Deploy sysctl configuration
+  ansible.builtin.template:
+    src: 99-qops-sysctl.conf.j2
+    dest: /etc/sysctl.d/99-qops.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply qops sysctl settings
+  tags:
+    - common
+
+- name: Deploy limits configuration
+  ansible.builtin.template:
+    src: 90-qops-limits.conf.j2
+    dest: /etc/security/limits.d/90-qops.conf
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - common
+
+- name: Deploy journald size caps
+  ansible.builtin.template:
+    src: journald-qops.conf.j2
+    dest: /etc/systemd/journald.conf.d/qops.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart systemd-journald
+  tags:
+    - common
+
+- name: Configure chrony servers
+  ansible.builtin.lineinfile:
+    path: /etc/chrony/chrony.conf
+    regexp: '^server {{ item | regex_escape }} '
+    line: "server {{ item }} iburst"
+    state: present
+    create: false
+  loop: "{{ common_chrony_servers }}"
+  when: ansible_os_family == "Debian"
+  notify: Restart chrony
+  tags:
+    - common
+
+- name: Ensure chrony is enabled
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+  when: ansible_os_family == "Debian"
+  tags:
+    - common
+
+- name: Ensure unattended-upgrades config directory exists (Debian)
+  ansible.builtin.file:
+    path: /etc/apt/apt.conf.d
+    state: directory
+    mode: "0755"
+  when: ansible_os_family == "Debian"
+  tags:
+    - common
+
+- name: Disable automatic reboot for unattended-upgrades (Debian)
+  ansible.builtin.template:
+    src: 50unattended-upgrades-qops.j2
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades-qops
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_os_family == "Debian"
+  tags:
+    - common
+
+- name: Ensure unattended-upgrades service is enabled (Debian)
+  ansible.builtin.service:
+    name: unattended-upgrades
+    enabled: true
+    state: started
+  when: ansible_os_family == "Debian"
+  tags:
+    - common
+
+- name: Ensure qops state directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ common_qops_config_dir }}"
+    - "{{ common_e2b_lib_dir }}"
+    - "{{ common_qops_backup_dir }}"
+  tags:
+    - common
+
+- name: Check whether secrets file already exists
+  ansible.builtin.stat:
+    path: "{{ common_qops_secrets_file }}"
+  register: common_secrets_stat
+  tags:
+    - common
+
+- name: Generate new secret values when secrets file is absent
+  ansible.builtin.set_fact:
+    common_sandbox_access_token_hash_seed: >-
+      {{ lookup('ansible.builtin.password', '/dev/null length=64 chars=ascii_letters,digits') }}
+    common_e2b_postgres_password: >-
+      {{ lookup('ansible.builtin.password', '/dev/null length=32 chars=ascii_letters,digits') }}
+    common_e2b_clickhouse_username: e2b
+    common_e2b_clickhouse_password: >-
+      {{ lookup('ansible.builtin.password', '/dev/null length=32 chars=ascii_letters,digits') }}
+    common_e2b_api_key_placeholder: ""
+  when: not common_secrets_stat.stat.exists
+  no_log: true
+  tags:
+    - common
+
+- name: Render secrets file on first install only
+  ansible.builtin.template:
+    src: secrets.env.j2
+    dest: "{{ common_qops_secrets_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not common_secrets_stat.stat.exists
+  no_log: true
+  tags:
+    - common
+
+- name: Enforce secrets file ownership and permissions
+  ansible.builtin.file:
+    path: "{{ common_qops_secrets_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: common_secrets_stat.stat.exists
+  no_log: true
   tags:
     - common

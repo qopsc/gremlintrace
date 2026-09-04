@@ -1,6 +1,144 @@
 ---
-- name: Placeholder for the e2b_datastores role
-  ansible.builtin.debug:
-    msg: "e2b_datastores role is implemented in task 6"
+- name: Ensure qops helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - e2b_datastores
+
+- name: Ensure e2b-data compose directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ e2b_datastores_compose_dir }}"
+    - "{{ e2b_datastores_postgres_init_dir }}"
+  tags:
+    - e2b_datastores
+
+- name: Render postgres init SQL
+  ansible.builtin.template:
+    src: postgres-init.sql.j2
+    dest: "{{ e2b_datastores_postgres_init_dir }}/01-init.sql"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_datastores
+
+- name: Render otel-collector configuration
+  ansible.builtin.template:
+    src: otel-collector.yaml.j2
+    dest: "{{ e2b_datastores_otel_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+    diff: false
+  no_log: true
+  tags:
+    - e2b_datastores
+
+- name: Render e2b-data docker compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ e2b_datastores_compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - e2b_datastores
+
+- name: Install ClickHouse TTL helper for e2b_services
+  ansible.builtin.copy:
+    src: e2b-apply-clickhouse-ttl.sh
+    dest: /usr/local/lib/qops/e2b-apply-clickhouse-ttl.sh
+    mode: "0755"
+    owner: root
+    group: root
+  tags:
+    - e2b_datastores
+
+- name: Start e2b-data compose stack and wait for health
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name {{ e2b_datastores_compose_project }}
+      --env-file {{ common_qops_secrets_file }}
+      -f {{ e2b_datastores_compose_file }}
+      up -d --wait
+  register: e2b_datastores_compose_up
+  changed_when: >-
+    'Created' in e2b_datastores_compose_up.stdout or
+    'Started' in e2b_datastores_compose_up.stdout or
+    'Recreated' in e2b_datastores_compose_up.stdout
+  tags:
+    - e2b_datastores
+
+- name: Check postgres extensions schema
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name {{ e2b_datastores_compose_project }}
+      --env-file {{ common_qops_secrets_file }}
+      -f {{ e2b_datastores_compose_file }}
+      exec -T postgres
+      psql -U {{ e2b_datastores_postgres_user }} -d {{ e2b_datastores_postgres_db }} -tAc
+      "SELECT 1 FROM pg_namespace WHERE nspname = 'extensions'"
+  register: e2b_datastores_pg_schema_check
+  changed_when: false
+  tags:
+    - e2b_datastores
+
+- name: Create postgres extensions schema when missing
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name {{ e2b_datastores_compose_project }}
+      --env-file {{ common_qops_secrets_file }}
+      -f {{ e2b_datastores_compose_file }}
+      exec -T postgres
+      psql -U {{ e2b_datastores_postgres_user }} -d {{ e2b_datastores_postgres_db }}
+      -v ON_ERROR_STOP=1 -c "CREATE SCHEMA extensions"
+  when: e2b_datastores_pg_schema_check.stdout | trim != '1'
+  register: e2b_datastores_pg_schema_create
+  changed_when: e2b_datastores_pg_schema_create.rc == 0
+  tags:
+    - e2b_datastores
+
+- name: Check postgres pgcrypto extension
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name {{ e2b_datastores_compose_project }}
+      --env-file {{ common_qops_secrets_file }}
+      -f {{ e2b_datastores_compose_file }}
+      exec -T postgres
+      psql -U {{ e2b_datastores_postgres_user }} -d {{ e2b_datastores_postgres_db }} -tAc
+      "SELECT 1 FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid
+      WHERE e.extname = 'pgcrypto' AND n.nspname = 'extensions'"
+  register: e2b_datastores_pg_ext_check
+  changed_when: false
+  tags:
+    - e2b_datastores
+
+- name: Create postgres pgcrypto extension when missing
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name {{ e2b_datastores_compose_project }}
+      --env-file {{ common_qops_secrets_file }}
+      -f {{ e2b_datastores_compose_file }}
+      exec -T postgres
+      psql -U {{ e2b_datastores_postgres_user }} -d {{ e2b_datastores_postgres_db }}
+      -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pgcrypto SCHEMA extensions"
+  when: e2b_datastores_pg_ext_check.stdout | trim != '1'
+  register: e2b_datastores_pg_ext_create
+  changed_when: e2b_datastores_pg_ext_create.rc == 0
   tags:
     - e2b_datastores
