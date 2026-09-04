@@ -39,3 +39,9 @@ preflight_dns_random_host: "{{ preflight_dns_random_label }}.e2b.{{ qops_domain 
 
 preflight_orchestrator_root: /orchestrator
 preflight_data_path_default: /var/lib/e2b
+
+# Required customer network inputs used by the doctor isolation probe.
+preflight_host_public_ip: "{{ qops_public_ipv4 | default('') }}"
+preflight_lan_ip: "{{ qops_lan_ipv4 | default('') }}"
+preflight_webhook_external_probe_cmd: "{{ doctor_webhook_external_probe_cmd | default('') }}"
+preflight_meminfo: /proc/meminfo

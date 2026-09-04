@@ -17,6 +17,10 @@ ALLOWED_PORT_22_UNITS="${PREFLIGHT_ALLOWED_PORT_22_UNITS:-ssh.service,sshd.servi
 ALLOWED_PORT_80_UNITS="${PREFLIGHT_ALLOWED_PORT_80_UNITS:-traefik.service}"
 ALLOWED_PORT_443_UNITS="${PREFLIGHT_ALLOWED_PORT_443_UNITS:-traefik.service}"
 EGRESS_URLS="${PREFLIGHT_EGRESS_URLS:-}"
+PUBLIC_IP="${PREFLIGHT_QOPS_PUBLIC_IPV4:-}"
+LAN_IP="${PREFLIGHT_QOPS_LAN_IPV4:-}"
+WEBHOOK_EXTERNAL_CMD="${PREFLIGHT_WEBHOOK_EXTERNAL_PROBE_CMD:-}"
+MEMINFO_PATH="${PREFLIGHT_MEMINFO:-/proc/meminfo}"
 
 CHECKS_STATE="$(mktemp)"
 FAILURES_STATE="$(mktemp)"
@@ -205,7 +209,10 @@ check_resources() {
   fi
   details+=("\"vcpus\":${vcpus}")
 
-  ram_mb="$(awk '/MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)"
+  ram_mb="$(awk '/MemTotal:/ {printf "%d", $2/1024}' "${MEMINFO_PATH}" 2>/dev/null || true)"
+  if ! [[ "${ram_mb}" =~ ^[0-9]+$ ]]; then
+    ram_mb=0
+  fi
   if (( ram_mb < MIN_RAM_MB )); then
     passed=false
     msg_parts+=("need >= ${MIN_RAM_MB} MiB RAM (found ${ram_mb})")
@@ -242,6 +249,62 @@ check_resources() {
     msg="Insufficient resources: $(IFS='; '; echo "${msg_parts[*]}")."
   fi
   add_check "resources" "CPU, RAM, and disk" "${passed}" "${msg}" "{$(IFS=,; echo "${details[*]}")}"
+}
+
+check_isolation_targets() {
+  local result public_class lan_class valid msg
+  result="$(python3 - "${PUBLIC_IP}" "${LAN_IP}" <<'PY'
+import ipaddress
+import json
+import sys
+
+public_raw, lan_raw = sys.argv[1:3]
+
+def kind(raw):
+    try:
+        addr = ipaddress.ip_address(raw)
+    except ValueError:
+        return "invalid"
+    if addr.version != 4 or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_unspecified:
+        return "invalid"
+    if addr in ipaddress.ip_network("100.64.0.0/10"):
+        return "private"
+    return "public" if addr.is_global else "private"
+
+public_class = kind(public_raw)
+lan_class = kind(lan_raw)
+valid = public_class == "public" and lan_class == "private" and public_raw != lan_raw
+print(json.dumps({
+    "public_ip": public_raw,
+    "lan_ip": lan_raw,
+    "public_class": public_class,
+    "lan_class": lan_class,
+    "valid": valid,
+}))
+PY
+)"
+  public_class="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["public_class"])' "${result}")"
+  lan_class="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["lan_class"])' "${result}")"
+  valid="$(python3 -c 'import json,sys; print("true" if json.loads(sys.argv[1])["valid"] else "false")' "${result}")"
+  if [[ "${valid}" == true ]]; then
+    msg="Isolation probe targets are valid: public ${PUBLIC_IP}, private/LAN ${LAN_IP}."
+  elif [[ -z "${PUBLIC_IP}" || -z "${LAN_IP}" ]]; then
+    msg="qops_public_ipv4 and qops_lan_ipv4 are required; set a globally routable IPv4 and a distinct RFC1918/LAN IPv4 before install."
+  else
+    msg="Invalid isolation probe targets: qops_public_ipv4=${PUBLIC_IP} (${public_class}), qops_lan_ipv4=${LAN_IP} (${lan_class}); set a globally routable IPv4 and a distinct private/LAN IPv4."
+  fi
+  add_check "isolation_targets" "Isolation probe target configuration" "${valid}" "${msg}" "${result}"
+}
+
+check_webhook_probe_config() {
+  if [[ -n "${WEBHOOK_EXTERNAL_CMD}" ]]; then
+    add_check "webhook_probe_config" "External webhook probe configuration" true \
+      "External webhook probe is configured." '{"configured":true}'
+    return
+  fi
+  add_check "webhook_probe_config" "External webhook probe configuration" false \
+    "doctor_webhook_external_probe_cmd is required; configure a probe that runs from a host outside this machine before install." \
+    '{"configured":false}'
 }
 
 unit_allowed() {
@@ -427,6 +490,8 @@ main() {
   check_kernel_nbd
   check_hugetlbfs
   check_resources
+  check_isolation_targets
+  check_webhook_probe_config
   check_port 22 "${ALLOWED_PORT_22_UNITS}" "port_22" "SSH port 22"
   check_port 80 "${ALLOWED_PORT_80_UNITS}" "port_80" "HTTP port 80"
   check_port 443 "${ALLOWED_PORT_443_UNITS}" "port_443" "HTTPS port 443"

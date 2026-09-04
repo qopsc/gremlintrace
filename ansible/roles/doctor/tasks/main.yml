@@ -1,6 +1,94 @@
 ---
-- name: Placeholder for the doctor role
+- name: Ensure qops lib directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - doctor
+
+- name: Install doctor helper scripts
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "{{ item.mode }}"
+    owner: root
+    group: root
+  loop:
+    - src: qops-doctor
+      dest: "{{ doctor_qops_doctor_script }}"
+      mode: "0755"
+    - src: isolation-probe.sh
+      dest: /usr/local/lib/qops/isolation-probe.sh
+      mode: "0755"
+    - src: e2b-smoke.sh
+      dest: /usr/local/lib/qops/e2b-smoke.sh
+      mode: "0755"
+    - src: e2b-smoke.mjs
+      dest: /usr/local/lib/qops/e2b-smoke.mjs
+      mode: "0644"
+  tags:
+    - doctor
+
+- name: Run qops-doctor
+  ansible.builtin.command:
+    cmd: "{{ doctor_qops_doctor_script }}"
+  environment:
+    DOCTOR_REPORT_PATH: "{{ doctor_report_path }}"
+    DOCTOR_PREFLIGHT_SCRIPT: "{{ doctor_preflight_script }}"
+    DOCTOR_PREFLIGHT_REPORT: "{{ doctor_preflight_report }}"
+    PREFLIGHT_REPORT_PATH: "{{ doctor_preflight_report }}"
+    PREFLIGHT_SCHEMA_VERSION: "{{ doctor_preflight_schema_version | string }}"
+    PREFLIGHT_MIN_VCPUS: "{{ doctor_preflight_min_vcpus | string }}"
+    PREFLIGHT_MIN_RAM_MB: "{{ doctor_preflight_min_ram_mb | string }}"
+    PREFLIGHT_MIN_DISK_GB: "{{ doctor_preflight_min_disk_gb | string }}"
+    PREFLIGHT_MIN_GLIBC: "{{ doctor_preflight_min_glibc }}"
+    PREFLIGHT_MIN_KERNEL: "{{ doctor_preflight_min_kernel }}"
+    PREFLIGHT_DATA_PATH: >-
+      {{ e2b_data_device if (e2b_data_device | default('') | length > 0)
+         else doctor_preflight_orchestrator_root }}
+    PREFLIGHT_QOPS_DOMAIN: "{{ qops_domain }}"
+    PREFLIGHT_DNS_API_HOST: "api.e2b.{{ qops_domain }}"
+    PREFLIGHT_DNS_RANDOM_HOST: "doctor-check.e2b.{{ qops_domain }}"
+    PREFLIGHT_QOPS_MARKER_DIR: "{{ common_qops_config_dir | default('/etc/qops') }}"
+    PREFLIGHT_EGRESS_URLS: >-
+      {{ (doctor_egress_urls_debian if ansible_os_family == 'Debian'
+          else doctor_egress_urls_fedora) | join('|') }}
+    DOCTOR_TEMPLATE_STORE: "{{ doctor_template_store }}"
+    DOCTOR_DISK_PATHS: "{{ doctor_disk_paths | join(' ') }}"
+    DOCTOR_UNITS: "{{ doctor_units | join(',') }}"
+    DOCTOR_KODUS_WEB_HEALTH: "{{ doctor_kodus_web_health }}"
+    DOCTOR_KODUS_API_HEALTH: "{{ doctor_kodus_api_health }}"
+    DOCTOR_KODUS_WEBHOOKS_HEALTH: "{{ doctor_kodus_webhooks_health }}"
+    DOCTOR_WEBHOOK_URL: "{{ doctor_webhook_url }}"
+    DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD: "{{ doctor_webhook_external_probe_cmd }}"
+    DOCTOR_MODULES_DIR: "{{ doctor_modules_dir }}"
+    DOCTOR_NBD_SYSFS: "{{ doctor_nbd_sysfs }}"
+    DOCTOR_MEMINFO: "{{ doctor_meminfo }}"
+    DOCTOR_DISK_FAIL_PERCENT: "{{ doctor_disk_fail_percent | string }}"
+    DOCTOR_E2B_SMOKE_CMD: /usr/local/lib/qops/e2b-smoke.sh
+    DOCTOR_ISOLATION_PROBE_SCRIPT: /usr/local/lib/qops/isolation-probe.sh
+    DOCTOR_SECRETS_FILE: "{{ common_qops_secrets_file | default('/etc/qops/secrets.env') }}"
+    E2B_API_URL: http://127.0.0.1:8080
+    E2B_DOMAIN: "e2b.{{ qops_domain }}"
+    DOCTOR_E2B_TEMPLATE: kodus-sandbox
+    DOCTOR_HOST_PUBLIC_IP: "{{ doctor_host_public_ip }}"
+    DOCTOR_LAN_IP: "{{ doctor_lan_ip }}"
+    DOCTOR_E2B_SDK: >-
+      {{ e2b_templates_install_dir | default('/usr/local/lib/qops/e2b-templates')
+         }}/node_modules/e2b/dist/index.js
+  register: doctor_run
+  changed_when: false
+  failed_when: doctor_run.rc != 0
+  when: not ansible_check_mode
+  tags:
+    - doctor
+
+- name: Show qops-doctor summary
   ansible.builtin.debug:
-    msg: "doctor role is implemented in task 10"
+    msg: "{{ doctor_run.stdout_lines | default([]) }}"
+  when: not ansible_check_mode
   tags:
     - doctor

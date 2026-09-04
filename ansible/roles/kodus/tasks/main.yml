@@ -1,6 +1,291 @@
 ---
-- name: Placeholder for the kodus role
+- name: Fail when Kodus IMAGE_TAG would be latest
+  ansible.builtin.assert:
+    that:
+      - kodus_image_tag is defined
+      - kodus_image_tag | length > 0
+      - kodus_image_tag != "latest"
+    fail_msg: kodus_image_tag must be a pinned tag from versions.yml, never latest
+  tags:
+    - kodus
+
+- name: Ensure qops lib directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - kodus
+
+- name: Install git for kodus-installer clone
+  ansible.builtin.package:
+    name: "{{ kodus_package_git }}"
+    state: present
+  tags:
+    - kodus
+
+- name: Install kodus helper scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/lib/qops/{{ item }}"
+    mode: "{{ '0755' if item.endswith('.sh') or item.endswith('.py') else '0644' }}"
+    owner: root
+    group: root
+  loop:
+    - render-kodus-env.py
+    - persist-kodus-secrets.sh
+    - kodus-ensure-networks.sh
+    - kodus-install-if-needed.sh
+    - kodus-wait-health.sh
+    - kodus-print-callbacks.sh
+    - compose-merge-ports.py
+    - validate-kodus-webhooks.py
+    - interpret-kodus-doctor.py
+    - kodus-run-doctor.sh
+  tags:
+    - kodus
+
+- name: Ensure Kodus state directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ kodus_persist_dir }}"
+    - "{{ kodus_install_dir | dirname }}"
+  tags:
+    - kodus
+
+- name: Clone kodus-installer at the pinned ref
+  ansible.builtin.git:
+    repo: "{{ kodus_git_repo }}"
+    dest: "{{ kodus_install_dir }}"
+    version: "{{ kodus_installer_ref }}"
+    force: false
+    update: true
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+  tags:
+    - kodus
+
+- name: Ensure Kodus Docker networks exist
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/kodus-ensure-networks.sh
+      {{ (kodus_docker_networks + [kodus_hairpin_network]) | unique | join(' ') }}
+  register: kodus_networks
+  changed_when: (kodus_networks.stdout_lines | last | default('')) == "changed"
+  tags:
+    - kodus
+
+- name: Read E2B_API_KEY for Kodus
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} E2B_API_KEY
+  register: kodus_e2b_api_key
+  changed_when: false
+  failed_when: false
+  no_log: true
+  tags:
+    - kodus
+
+- name: Fail when E2B_API_KEY is empty
+  ansible.builtin.fail:
+    msg: E2B_API_KEY is empty in {{ common_qops_secrets_file }}; e2b_services seed must run first.
+  when: kodus_e2b_api_key.rc != 0 or (kodus_e2b_api_key.stdout | default('') | trim | length == 0)
+  tags:
+    - kodus
+
+- name: Read optional LLM key from secrets.env
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} API_OPEN_AI_API_KEY
+  register: kodus_secrets_openai_key
+  changed_when: false
+  failed_when: false
+  no_log: true
+  tags:
+    - kodus
+
+- name: Read optional license key from secrets.env
+  ansible.builtin.command:
+    cmd: /usr/local/lib/qops/e2b-read-secret.sh {{ common_qops_secrets_file }} KODUS_LICENSE_KEY
+  register: kodus_secrets_license_key
+  changed_when: false
+  failed_when: false
+  no_log: true
+  tags:
+    - kodus
+
+- name: Resolve Kodus LLM and license keys
+  ansible.builtin.set_fact:
+    kodus_openai_api_key_effective: >-
+      {{ kodus_openai_api_key if (kodus_openai_api_key | length > 0)
+         else (kodus_secrets_openai_key.stdout | default('') | trim) }}
+    kodus_license_key_effective: >-
+      {{ kodus_license_key if (kodus_license_key | default('') | length > 0)
+         else (kodus_secrets_license_key.stdout | default('') | trim) }}
+  no_log: true
+  tags:
+    - kodus
+
+- name: Write Kodus env render config
+  ansible.builtin.copy:
+    dest: "{{ kodus_env_render_config }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ kodus_env_render_payload | to_nice_json }}"
+  vars:
+    kodus_env_render_payload:
+      qops_domain: "{{ qops_domain }}"
+      web_host: "{{ kodus_web_host }}"
+      api_host: "{{ kodus_api_host }}"
+      webhooks_host: "{{ kodus_webhooks_host }}"
+      web_url: "{{ kodus_web_url }}"
+      e2b_domain: "{{ kodus_e2b_domain }}"
+      e2b_api_key: "{{ kodus_e2b_api_key.stdout | trim }}"
+      image_tag: "{{ kodus_image_tag }}"
+      sandbox_provider: "{{ kodus_sandbox_provider }}"
+      template_id: "{{ kodus_e2b_template_id }}"
+      template_graph_id: "{{ kodus_e2b_template_graph_id }}"
+      worker_role: "{{ kodus_worker_role }}"
+      cloud_mode: "{{ kodus_cloud_mode }}"
+      telemetry_disabled: "{{ kodus_telemetry_disabled | bool }}"
+      license_key: "{{ kodus_license_key_effective }}"
+      llm_provider_model: "{{ kodus_llm_provider_model }}"
+      openai_api_key: "{{ kodus_openai_api_key_effective }}"
+      openai_force_base_url: "{{ kodus_openai_force_base_url }}"
+      web_port_api: "{{ kodus_web_port_api }}"
+      hairpin_fallback: "{{ kodus_extra_hosts_hairpin | bool }}"
+      e2b_api_url: "https://api.{{ kodus_e2b_domain }}"
+      e2b_sandbox_url: "https://sandbox.{{ kodus_e2b_domain }}"
+      env_overrides: "{{ kodus_env_overrides }}"
+  no_log: true
+  tags:
+    - kodus
+
+- name: Render Kodus .env from upstream example plus managed keys
+  ansible.builtin.command:
+    cmd: >-
+      python3 /usr/local/lib/qops/render-kodus-env.py
+      --example {{ kodus_install_dir }}/.env.example
+      --output {{ kodus_env_file }}
+      --config {{ kodus_env_render_config }}
+      --overlay {{ kodus_generated_secrets_file }}
+      --mode 0600
+  register: kodus_env_render
+  changed_when: (kodus_env_render.stdout | trim) == "changed"
+  no_log: true
+  tags:
+    - kodus
+
+- name: Enforce Kodus .env permissions
+  ansible.builtin.file:
+    path: "{{ kodus_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  tags:
+    - kodus
+
+- name: Generate Kodus secrets once and persist them
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/persist-kodus-secrets.sh
+      {{ kodus_env_file }}
+      {{ kodus_generated_secrets_file }}
+      {{ kodus_install_dir }}/scripts/generate-secrets.sh
+      {{ kodus_install_dir }}/scripts/schema-vars.sh
+  register: kodus_secrets
+  changed_when: (kodus_secrets.stdout_lines | last | default('')) == "generated"
+  no_log: true
+  tags:
+    - kodus
+
+- name: Render docker-compose.override.yml
+  ansible.builtin.template:
+    src: docker-compose.override.yml.j2
+    dest: "{{ kodus_compose_override }}"
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - kodus
+
+- name: Fail if merged Compose ports are not bound to loopback
+  ansible.builtin.command:
+    cmd: >-
+      python3 /usr/local/lib/qops/compose-merge-ports.py check
+      --base {{ kodus_install_dir }}/docker-compose.yml
+      --override {{ kodus_compose_override }}
+      --env-file {{ kodus_env_file }}
+      --require-ip {{ kodus_bind_host }}
+  register: kodus_compose_bind_check
+  changed_when: false
+  tags:
+    - kodus
+
+- name: Start Kodus via install.sh when desired state changed
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/kodus-install-if-needed.sh
+      {{ kodus_install_dir }}
+      {{ kodus_digest_file }}
+      {{ kodus_installer_ref }}
+  environment:
+    KODUS_COMPOSE_MERGE_PY: /usr/local/lib/qops/compose-merge-ports.py
+    KODUS_COMPOSE_BASE: "{{ kodus_install_dir }}/docker-compose.yml"
+    KODUS_COMPOSE_OVERRIDE: "{{ kodus_compose_override }}"
+    KODUS_ENV_FILE: "{{ kodus_env_file }}"
+  register: kodus_install
+  changed_when: (kodus_install.stdout_lines | last | default('')) == "installed"
+  tags:
+    - kodus
+
+- name: Wait for Kodus health endpoints
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/kodus-wait-health.sh
+      {{ item }}
+      {{ kodus_health_retries }}
+      {{ kodus_health_delay_seconds }}
+  loop: "{{ kodus_health_urls }}"
+  changed_when: false
+  tags:
+    - kodus
+
+- name: Validate webhooks and run upstream doctor.sh
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/kodus-run-doctor.sh
+      {{ kodus_env_file }}
+      {{ kodus_webhooks_host }}
+      {{ kodus_api_host }}
+      {{ kodus_install_dir }}
+  register: kodus_upstream_doctor
+  changed_when: false
+  tags:
+    - kodus
+
+- name: Print GitHub App and OAuth callback URLs
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/kodus-print-callbacks.sh
+      {{ kodus_web_url }}
+      {{ kodus_webhooks_url }}
+      {{ kodus_api_url }}
+      {{ kodus_callback_urls_file }}
+  register: kodus_callbacks
+  changed_when: false
+  tags:
+    - kodus
+
+- name: Show callback URLs the operator must register
   ansible.builtin.debug:
-    msg: "kodus role is implemented in task 9"
+    msg: "{{ kodus_callbacks.stdout_lines }}"
   tags:
     - kodus

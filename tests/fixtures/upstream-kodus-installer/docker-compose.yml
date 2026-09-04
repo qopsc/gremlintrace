@@ -1,0 +1,238 @@
+services:
+  kodus-web:
+    image: ${KODUS_REGISTRY:-ghcr.io/kodustech}/kodus-ai-web:${IMAGE_TAG:-latest}
+    container_name: kodus-web-prod
+    ports:
+      - "${WEB_PORT}:${WEB_PORT}"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - shared-network
+      - kodus-backend-services
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  api:
+    image: ${KODUS_REGISTRY:-ghcr.io/kodustech}/kodus-ai-api:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+    container_name: ${GLOBAL_API_CONTAINER_NAME:-kodus-api}
+    volumes:
+      - log_volume:/app/logs
+    logging:
+      options:
+        max-size: "200m"
+        max-file: "10"
+    ports:
+      - "3001:3001"
+    environment:
+      - ENV=production
+      - NODE_ENV=production
+    networks:
+      - shared-network
+      - kodus-backend-services
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - db_kodus_postgres
+      - db_kodus_mongodb
+      - rabbitmq
+
+  worker:
+    image: ${KODUS_REGISTRY:-ghcr.io/kodustech}/kodus-ai-worker:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+    container_name: kodus-worker-prod
+    volumes:
+      - log_volume:/app/logs
+    logging:
+      options:
+        max-size: "200m"
+        max-file: "10"
+    environment:
+      - ENV=production
+      - NODE_ENV=production
+      # Only `api` runs DB migrations on boot — it runs the OLTP *and* the
+      # analytics-warehouse migrations from the shared prod-entrypoint. If
+      # worker/webhooks/worker-analytics also migrated concurrently they would
+      # race on CREATE TYPE (duplicate key pg_type_typname_nsp_index) and
+      # crash-loop the first boot. Override the .env default to false here.
+      - RUN_MIGRATIONS=false
+    networks:
+      - shared-network
+      - kodus-backend-services
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - db_kodus_postgres
+      - db_kodus_mongodb
+      - rabbitmq
+
+  # Analytics ingestion worker (Enterprise / Cockpit). Same image as `worker`,
+  # only WORKER_ROLE differs: this process runs the cockpit warehouse ingestion
+  # + PR classifier crons and writes the `analytics` Postgres schema. The main
+  # `worker` stays role=code-review and never touches analytics.
+  #
+  # Opt-in: gated behind the `analytics` compose profile so community installs
+  # don't pay for an idle worker. Enable with `COMPOSE_PROFILES=analytics`
+  # (and set the ANALYTICS_* block in .env). See docs → Analytics Worker.
+  worker-analytics:
+    image: ${KODUS_REGISTRY:-ghcr.io/kodustech}/kodus-ai-worker:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+    container_name: kodus-worker-analytics
+    profiles:
+      - analytics
+    volumes:
+      - log_volume:/app/logs
+    logging:
+      options:
+        max-size: "200m"
+        max-file: "10"
+    environment:
+      - ENV=production
+      - NODE_ENV=production
+      - WORKER_ROLE=analytics
+      # Migrations belong to `api` only — see the note on the `worker` service.
+      - RUN_MIGRATIONS=false
+    networks:
+      - shared-network
+      - kodus-backend-services
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - db_kodus_postgres
+      - db_kodus_mongodb
+      - rabbitmq
+
+  webhooks:
+    image: ${KODUS_REGISTRY:-ghcr.io/kodustech}/kodus-ai-webhook:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+    container_name: kodus-webhooks-prod
+    volumes:
+      - log_volume:/app/logs
+    logging:
+      options:
+        max-size: "200m"
+        max-file: "10"
+    ports:
+      - "${API_WEBHOOKS_PORT:-3332}:${API_WEBHOOKS_PORT:-3332}"
+    environment:
+      - ENV=production
+      - NODE_ENV=production
+      - API_WEBHOOKS_PORT=${API_WEBHOOKS_PORT:-3332}
+      # Migrations belong to `api` only — see the note on the `worker` service.
+      - RUN_MIGRATIONS=false
+    networks:
+      - shared-network
+      - kodus-backend-services
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - db_kodus_postgres
+      - db_kodus_mongodb
+      - rabbitmq
+
+  kodus-mcp-manager:
+    image: ${KODUS_REGISTRY:-ghcr.io/kodustech}/kodus-mcp-manager:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+    container_name: kodus-mcp-manager
+    ports:
+      - "${API_MCP_MANAGER_PORT:-3101}:${API_MCP_MANAGER_PORT:-3101}"
+    environment:
+      - NODE_ENV=${API_MCP_MANAGER_NODE_ENV:-production}
+      - API_MCP_MANAGER_NODE_ENV=${API_MCP_MANAGER_NODE_ENV:-production}
+    env_file:
+      - .env
+    networks:
+      - kodus-backend-services
+      - shared-network
+    restart: unless-stopped
+
+  rabbitmq:
+    # Pre-built image bundling the rabbitmq_delayed_message_exchange plugin
+    # (required by Kodus workflow delayed retries — see kodus-ai issue #873).
+    # Published by kodus-ai .github/workflows/rabbitmq-build-push.yml: base
+    # digest-pinned, plugin/rabbitmqadmin SHA256-verified, Trivy-scanned, and
+    # it provisions both the kodus-ai and kodus-ast vhosts. Pinned to a fixed
+    # tag rather than :latest because this image tracks the RabbitMQ + plugin
+    # version, not the Kodus release. The local docker/rabbitmq/ build context
+    # is kept as a fallback but is no longer used.
+    image: ${KODUS_REGISTRY:-ghcr.io/kodustech}/kodus-rabbitmq:4.2.2-kodus
+    container_name: rabbitmq-prod
+    hostname: ${RABBITMQ_HOSTNAME:-rabbitmq}
+    ports:
+      - "5672"
+      - "15672"
+      - "15692:15692"
+    networks:
+      - monitoring-network
+      - shared-network
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER:-kodus}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS:-kodus}
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit heartbeat 60
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - rabbitmq-data-prod:/var/lib/rabbitmq
+    command: /usr/local/bin/init-definitions.sh
+    restart: unless-stopped
+
+  db_kodus_postgres:
+    image: docker.io/pgvector/pgvector:pg16
+    container_name: db_kodus_postgres
+    ports:
+      - "5432"
+    environment:
+      POSTGRES_USER: ${API_PG_DB_USERNAME}
+      POSTGRES_PASSWORD: ${API_PG_DB_PASSWORD}
+      POSTGRES_DB: ${API_PG_DB_DATABASE}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+    networks:
+      - kodus-backend-services
+
+  db_kodus_mongodb:
+    image: docker.io/mongo:8
+    container_name: db_kodus_mongodb
+    ports:
+      - "27017"
+    volumes:
+      - mongodbdata:/data/db
+    environment:
+      # These variables must be defined in the .env file
+      MONGO_INITDB_ROOT_USERNAME: ${API_MG_DB_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${API_MG_DB_PASSWORD}
+      MONGO_INITDB_DATABASE: ${API_MG_DB_DATABASE}
+    networks:
+      - kodus-backend-services
+
+volumes:
+  log_volume:
+  rabbitmq-data-prod:
+    name: rabbitmq-data-prod
+  pgdata:
+  mongodbdata:
+
+networks:
+  shared-network:
+    external: true
+  monitoring-network:
+    driver: bridge
+    name: monitoring-network
+    external: true
+  kodus-backend-services:
+    driver: bridge
+    name: kodus-backend-services
+    external: true

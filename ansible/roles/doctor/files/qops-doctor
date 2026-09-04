@@ -1,0 +1,574 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPORT_PATH="${DOCTOR_REPORT_PATH:-/etc/qops/doctor.json}"
+PREFLIGHT_SCRIPT="${DOCTOR_PREFLIGHT_SCRIPT:-/usr/local/lib/qops/run-preflight.sh}"
+PREFLIGHT_REPORT="${DOCTOR_PREFLIGHT_REPORT:-/etc/qops/preflight.json}"
+SYSTEMCTL_BIN="${DOCTOR_SYSTEMCTL_CMD:-systemctl}"
+DOCKER_BIN="${DOCTOR_DOCKER_CMD:-docker}"
+CURL_BIN="${DOCTOR_CURL_CMD:-curl}"
+MEMINFO="${DOCTOR_MEMINFO:-/proc/meminfo}"
+MODULES_DIR="${DOCTOR_MODULES_DIR:-/lib/modules}"
+NBD_SYSFS="${DOCTOR_NBD_SYSFS:-/sys/block}"
+DF_BIN="${DOCTOR_DF_CMD:-df}"
+DU_BIN="${DOCTOR_DU_CMD:-du}"
+TEMPLATE_STORE="${DOCTOR_TEMPLATE_STORE:-/var/lib/e2b/storage}"
+DISK_PATHS="${DOCTOR_DISK_PATHS:-/var/lib/e2b /orchestrator}"
+SMOKE_CMD="${DOCTOR_E2B_SMOKE_CMD:-/usr/local/lib/qops/e2b-smoke.sh}"
+WORKER_LOGS_CMD="${DOCTOR_WORKER_LOGS_CMD:-}"
+WEBHOOK_EXTERNAL_CMD="${DOCTOR_WEBHOOK_EXTERNAL_PROBE_CMD:-}"
+WEBHOOK_URL="${DOCTOR_WEBHOOK_URL:-}"
+KODUS_WEB_HEALTH="${DOCTOR_KODUS_WEB_HEALTH:-http://127.0.0.1:3000/health}"
+KODUS_API_HEALTH="${DOCTOR_KODUS_API_HEALTH:-http://127.0.0.1:3001/health}"
+KODUS_WEBHOOKS_HEALTH="${DOCTOR_KODUS_WEBHOOKS_HEALTH:-http://127.0.0.1:3332/health}"
+RABBITMQ_QUEUES_CMD="${DOCTOR_RABBITMQ_QUEUES_CMD:-}"
+UNITS="${DOCTOR_UNITS:-e2b-orchestrator,e2b-api,e2b-client-proxy,traefik}"
+DISK_FAIL_PERCENT="${DOCTOR_DISK_FAIL_PERCENT:-95}"
+WORKER_FALLBACK_NEEDLE="${DOCTOR_WORKER_FALLBACK_NEEDLE:-falling back to default}"
+
+CHECKS_STATE="$(mktemp)"
+FAILURES_STATE="$(mktemp)"
+SMOKE_JSON_FILE="$(mktemp)"
+trap 'rm -f "${CHECKS_STATE}" "${FAILURES_STATE}" "${SMOKE_JSON_FILE}"' EXIT
+printf '[]' >"${CHECKS_STATE}"
+printf '[]' >"${FAILURES_STATE}"
+
+add_check() {
+  local id="$1" name="$2" passed="$3" message="$4"
+  local details="${5:-{}}"
+  local skipped="${6:-false}"
+  python3 - "${CHECKS_STATE}" "${FAILURES_STATE}" "${id}" "${name}" "${passed}" "${message}" "${details}" "${skipped}" <<'PY'
+import json
+import sys
+
+checks_path, failures_path, check_id, name, passed, message, details_raw, skipped = sys.argv[1:9]
+checks = json.load(open(checks_path, encoding="utf-8"))
+try:
+    details = json.loads(details_raw)
+except json.JSONDecodeError:
+    details = {"raw": details_raw}
+item = {
+    "id": check_id,
+    "name": name,
+    "passed": passed == "true",
+    "message": message,
+    "details": details,
+}
+if skipped == "true":
+    item["skipped"] = True
+    item["unverified"] = True
+    item["passed"] = False
+checks.append(item)
+json.dump(checks, open(checks_path, "w", encoding="utf-8"))
+if passed != "true" and skipped != "true":
+    failures = json.load(open(failures_path, encoding="utf-8"))
+    failures.append(message)
+    json.dump(failures, open(failures_path, "w", encoding="utf-8"))
+PY
+}
+
+http_code() {
+  local url="$1"
+  if ! command -v "${CURL_BIN}" >/dev/null 2>&1; then
+    printf '000'
+    return 1
+  fi
+  set +e
+  local status
+  status="$("${CURL_BIN}" -sS -o /dev/null -w '%{http_code}' --max-time 15 -L "${url}" 2>/dev/null)"
+  local rc=$?
+  set -e
+  if [[ "${rc}" -ne 0 ]]; then
+    printf '000'
+    return 1
+  fi
+  printf '%s' "${status}"
+}
+
+check_preflight() {
+  if [[ ! -x "${PREFLIGHT_SCRIPT}" && ! -f "${PREFLIGHT_SCRIPT}" ]]; then
+    add_check "preflight" "Preflight re-check" false \
+      "Preflight runner missing at ${PREFLIGHT_SCRIPT}." "{}"
+    return
+  fi
+  set +e
+  bash "${PREFLIGHT_SCRIPT}"
+  local rc=$?
+  set -e
+  if [[ ! -f "${PREFLIGHT_REPORT}" ]]; then
+    add_check "preflight" "Preflight re-check" false \
+      "Preflight did not write ${PREFLIGHT_REPORT} (exit ${rc})." "{}"
+    return
+  fi
+  python3 - "${PREFLIGHT_REPORT}" "${CHECKS_STATE}" "${FAILURES_STATE}" "${rc}" <<'PY'
+import json
+import sys
+
+report_path, checks_path, failures_path, rc = sys.argv[1:5]
+msg = ""
+passed = False
+details = {"exit": int(rc)}
+try:
+    raw = open(report_path, encoding="utf-8").read()
+    report = json.loads(raw)
+except (OSError, json.JSONDecodeError) as exc:
+    msg = f"Preflight report is malformed or truncated ({exc})."
+    details["error"] = str(exc)
+    report = None
+if report is not None:
+    required = ("version", "timestamp", "passed", "checks", "failures")
+    missing = [key for key in required if key not in report]
+    if missing:
+        msg = "Preflight report has the wrong schema; missing: " + ", ".join(missing)
+        details["missing"] = missing
+    elif not isinstance(report.get("checks"), list) or not isinstance(report.get("failures"), list):
+        msg = "Preflight report has the wrong schema; checks and failures must be lists."
+        details["schema"] = "checks/failures"
+    elif report.get("version") != 1 and report.get("version") != "1":
+        msg = f"Preflight report schema version {report.get('version')!r} is unsupported."
+        details["version"] = report.get("version")
+    else:
+        passed = bool(report.get("passed")) and rc == "0"
+        failures = report.get("failures") or []
+        msg = "Preflight checks passed." if passed else (
+            "Preflight re-check failed: " + " ".join(str(f) for f in failures)
+        )
+        details = {"preflight_passed": report.get("passed"), "failures": failures, "exit": int(rc)}
+checks = json.load(open(checks_path, encoding="utf-8"))
+checks.append({
+    "id": "preflight",
+    "name": "Preflight re-check",
+    "passed": passed,
+    "message": msg,
+    "details": details,
+})
+json.dump(checks, open(checks_path, "w", encoding="utf-8"))
+if not passed:
+    all_f = json.load(open(failures_path, encoding="utf-8"))
+    all_f.append(msg)
+    json.dump(all_f, open(failures_path, "w", encoding="utf-8"))
+PY
+}
+
+check_units() {
+  local unit check_id name passed msg
+  IFS=',' read -r -a unit_list <<<"${UNITS}"
+  for unit in "${unit_list[@]}"; do
+    unit="${unit// /}"
+    [[ -z "${unit}" ]] && continue
+    check_id="unit_${unit//-/_}"
+    name="Unit ${unit}"
+    set +e
+    "${SYSTEMCTL_BIN}" is-active --quiet "${unit}"
+    local rc=$?
+    set -e
+    if [[ "${rc}" -eq 0 ]]; then
+      passed=true
+      msg="${unit} is active."
+    else
+      passed=false
+      msg="${unit} is not active."
+    fi
+    add_check "${check_id}" "${name}" "${passed}" "${msg}" "{\"unit\":\"${unit}\"}"
+  done
+}
+
+check_hugepages() {
+  if [[ ! -f "${MEMINFO}" ]]; then
+    add_check "hugepages" "Hugepages free" false "Cannot read ${MEMINFO}." "{}"
+    return
+  fi
+  local total free size
+  total="$(awk '/HugePages_Total:/ {print $2}' "${MEMINFO}" || echo 0)"
+  free="$(awk '/HugePages_Free:/ {print $2}' "${MEMINFO}" || echo 0)"
+  size="$(awk '/Hugepagesize:/ {print $2}' "${MEMINFO}" || echo 0)"
+  total="${total:-0}"
+  free="${free:-0}"
+  if [[ "${total}" == "0" ]]; then
+    add_check "hugepages" "Hugepages free" false \
+      "Hugepages_Total is 0; e2b-hugepages did not allocate pages." \
+      "{\"HugePages_Total\":${total},\"HugePages_Free\":${free},\"Hugepagesize_kB\":${size:-0}}"
+    return
+  fi
+  add_check "hugepages" "Hugepages free" true \
+    "Hugepages_Free=${free} of ${total}." \
+    "{\"HugePages_Total\":${total},\"HugePages_Free\":${free},\"Hugepagesize_kB\":${size:-0}}"
+}
+
+check_nbd_in_use() {
+  if [[ ! -d "${NBD_SYSFS}" ]]; then
+    add_check "nbd_in_use" "NBD devices in use" false \
+      "Block sysfs ${NBD_SYSFS} is missing." "{}"
+    return
+  fi
+  local in_use=0
+  local dev size
+  for dev in "${NBD_SYSFS}"/nbd*; do
+    [[ -e "${dev}" ]] || continue
+    size="$(cat "${dev}/size" 2>/dev/null || echo 0)"
+    if [[ "${size}" =~ ^[0-9]+$ ]] && (( size > 0 )); then
+      in_use=$((in_use + 1))
+    fi
+  done
+  add_check "nbd_in_use" "NBD devices in use" true \
+    "${in_use} nbd device(s) currently in use." "{\"in_use\":${in_use}}"
+}
+
+check_nbd_ko_newest() {
+  python3 - "${MODULES_DIR}" "${CHECKS_STATE}" "${FAILURES_STATE}" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+modules_dir, checks_path, failures_path = sys.argv[1:4]
+root = pathlib.Path(modules_dir)
+
+def kernel_key(name):
+    match = re.match(r"^(\d+(?:\.\d+)*)(.*)$", name)
+    if not match:
+        return ((-1,), 0, name)
+    nums = tuple(int(part) for part in match.group(1).split("."))
+    rest = match.group(2).lstrip("-")
+    is_release = 0 if re.search(r"(^|[.-])rc\d+", rest, re.I) else 1
+    return (nums, is_release, rest)
+
+def has_nbd(directory):
+    for path in directory.rglob("nbd.ko"):
+        return str(path)
+    for path in directory.rglob("nbd.ko.*"):
+        return str(path)
+    return ""
+
+def add(passed, message, details):
+    checks = json.load(open(checks_path, encoding="utf-8"))
+    checks.append({
+        "id": "nbd_ko_newest_kernel",
+        "name": "nbd.ko for newest installed kernel",
+        "passed": passed,
+        "message": message,
+        "details": details,
+    })
+    json.dump(checks, open(checks_path, "w", encoding="utf-8"))
+    if not passed:
+        failures = json.load(open(failures_path, encoding="utf-8"))
+        failures.append(message)
+        json.dump(failures, open(failures_path, "w", encoding="utf-8"))
+
+if not root.is_dir():
+    add(False, f"No installed kernels under {modules_dir}.", {})
+    raise SystemExit(0)
+
+dirs = [p for p in root.iterdir() if p.is_dir()]
+if not dirs:
+    add(False, f"No installed kernels under {modules_dir}.", {})
+    raise SystemExit(0)
+
+ranked = sorted(dirs, key=lambda p: kernel_key(p.name))
+newest_key = kernel_key(ranked[-1].name)
+flavors = [p for p in dirs if kernel_key(p.name)[:2] == newest_key[:2]]
+missing = []
+present = {}
+for flavor in flavors:
+    path = has_nbd(flavor)
+    if path:
+        present[flavor.name] = path
+    else:
+        missing.append(flavor.name)
+names = [p.name for p in flavors]
+if missing:
+    add(
+        False,
+        "nbd.ko missing for newest kernel flavor(s) "
+        + ", ".join(sorted(missing))
+        + "; an unattended kernel update will break Firecracker nbd.",
+        {"kernels": names, "missing": missing, "present": present},
+    )
+else:
+    add(
+        True,
+        "nbd module present for newest kernel flavor(s) " + ", ".join(sorted(names)) + ".",
+        {"kernels": names, "present": present},
+    )
+PY
+}
+
+check_disk() {
+  local path msg_parts=() passed=true details="["
+  local first=true
+  for path in ${DISK_PATHS}; do
+    if [[ ! -e "${path}" ]]; then
+      passed=false
+      msg_parts+=("${path} does not exist")
+      continue
+    fi
+    local line pct
+    line="$("${DF_BIN}" -P "${path}" 2>/dev/null | tail -n1 || true)"
+    pct="$(awk '{print $(NF-1)}' <<<"${line}" | tr -d '%')"
+    if ! [[ "${pct}" =~ ^[0-9]+$ ]]; then
+      passed=false
+      msg_parts+=("cannot measure ${path}")
+      continue
+    fi
+    if (( pct >= DISK_FAIL_PERCENT )); then
+      passed=false
+      msg_parts+=("${path} is ${pct}% full")
+    fi
+    if [[ "${first}" == true ]]; then
+      first=false
+    else
+      details+=","
+    fi
+    details+="{\"path\":\"${path}\",\"percent\":${pct}}"
+  done
+  details+="]"
+  if [[ "${passed}" == true ]]; then
+    add_check "disk_usage" "Disk usage" true "Disk paths are below ${DISK_FAIL_PERCENT}%." "${details}"
+  else
+    add_check "disk_usage" "Disk usage" false \
+      "Disk usage check failed: $(IFS='; '; echo "${msg_parts[*]}")." "${details}"
+  fi
+}
+
+check_template_store() {
+  if [[ ! -d "${TEMPLATE_STORE}" ]]; then
+    add_check "template_store" "Template store usage" false \
+      "Template store ${TEMPLATE_STORE} is missing." "{}"
+    return
+  fi
+  local bytes
+  bytes="$("${DU_BIN}" -sb "${TEMPLATE_STORE}" 2>/dev/null | awk '{print $1}' || echo 0)"
+  add_check "template_store" "Template store usage" true \
+    "Template store ${TEMPLATE_STORE} uses ${bytes} bytes." \
+    "{\"path\":\"${TEMPLATE_STORE}\",\"bytes\":${bytes:-0}}"
+}
+
+check_http_named() {
+  local id="$1" name="$2" url="$3"
+  local status
+  status="$(http_code "${url}" || true)"
+  if [[ "${status}" == "200" ]]; then
+    add_check "${id}" "${name}" true "${name} returned HTTP 200." "{\"url\":\"${url}\",\"status\":${status}}"
+  else
+    add_check "${id}" "${name}" false \
+      "${name} health check failed (HTTP ${status}) at ${url}." \
+      "{\"url\":\"${url}\",\"status\":\"${status}\"}"
+  fi
+}
+
+check_rabbitmq() {
+  local cmd="${RABBITMQ_QUEUES_CMD}"
+  if [[ -z "${cmd}" ]]; then
+    cmd="${DOCKER_BIN} exec rabbitmq-prod rabbitmqctl list_queues -q name messages"
+  fi
+  local out rc
+  set +e
+  # shellcheck disable=SC2086
+  out="$(eval "${cmd}" 2>&1)"
+  rc=$?
+  set -e
+  if [[ "${rc}" -ne 0 ]]; then
+    add_check "rabbitmq_queues" "RabbitMQ queues" false \
+      "Cannot list RabbitMQ queues." "{\"rc\":${rc}}"
+    return
+  fi
+  add_check "rabbitmq_queues" "RabbitMQ queues" true \
+    "RabbitMQ queues listed." "{\"queues\":$(python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' <<<"${out}")}"
+}
+
+check_smoke_and_isolation() {
+  local out rc
+  set +e
+  out="$(eval "${SMOKE_CMD}" 2>&1)"
+  rc=$?
+  set -e
+  printf '%s\n' "${out}" >"${SMOKE_JSON_FILE}"
+  python3 - "${SMOKE_JSON_FILE}" "${CHECKS_STATE}" "${FAILURES_STATE}" "${rc}" <<'PY'
+import json
+import sys
+
+path, checks_path, failures_path, rc = sys.argv[1:5]
+raw = open(path, encoding="utf-8").read().strip()
+payload = {}
+line = raw.splitlines()[-1] if raw else ""
+try:
+    payload = json.loads(line)
+except json.JSONDecodeError:
+    payload = {"ok": False, "error": "unparseable-smoke", "raw": raw[-500:]}
+
+def add(cid, name, passed, message, details):
+    checks = json.load(open(checks_path, encoding="utf-8"))
+    checks.append({
+        "id": cid,
+        "name": name,
+        "passed": passed,
+        "message": message,
+        "details": details,
+    })
+    json.dump(checks, open(checks_path, "w", encoding="utf-8"))
+    if not passed:
+        failures = json.load(open(failures_path, encoding="utf-8"))
+        failures.append(message)
+        json.dump(failures, open(failures_path, "w", encoding="utf-8"))
+
+smoke_ok = payload.get("ok") is True and payload.get("echo") == "ok" and payload.get("killed") is True and rc == "0"
+add(
+    "e2b_smoke",
+    "E2B smoke test",
+    smoke_ok,
+    "E2B sandbox smoke test passed." if smoke_ok else "E2B smoke test failed (create/echo/kill).",
+    payload,
+)
+iso = payload.get("isolation") or {}
+required_iso = (
+    "ok", "targets_valid", "host_health", "npm", "lan",
+    "host_listener", "lan_listener",
+)
+missing_iso = [k for k in required_iso if k not in iso]
+iso_ok = (
+    not missing_iso
+    and iso.get("ok") is True
+    and iso.get("targets_valid") is True
+    and iso.get("host_health") == "blocked"
+    and iso.get("npm") == "ok"
+    and iso.get("lan") == "blocked"
+    and iso.get("host_listener") == "live"
+    and iso.get("lan_listener") == "live"
+)
+host_v = iso.get("host_health")
+npm_v = iso.get("npm")
+lan_v = iso.get("lan")
+if missing_iso:
+    msg = "Isolation probe missing semantic fields: " + ", ".join(missing_iso)
+elif iso_ok:
+    msg = "Isolation probe: host orchestrator blocked, npm reachable, LAN blocked."
+elif iso.get("targets_valid") is not True:
+    msg = (
+        "Isolation probe targets are invalid or not distinct "
+        f"(public={iso.get('public_ip')}, lan={iso.get('lan_ip')}, "
+        f"class={iso.get('public_class')}/{iso.get('lan_class')})."
+    )
+elif iso.get("host_listener") != "live" or iso.get("lan_listener") != "live":
+    msg = (
+        "Isolation probe listeners unproven "
+        f"(host_listener={iso.get('host_listener')}, lan_listener={iso.get('lan_listener')})."
+    )
+elif "inconclusive" in (host_v, npm_v, lan_v):
+    msg = (
+        "Isolation probe inconclusive "
+        f"(host={host_v}, npm={npm_v}, lan={lan_v}); cannot distinguish blocked from probe failure."
+    )
+else:
+    msg = f"Isolation probe failed (host={host_v}, npm={npm_v}, lan={lan_v})."
+add("isolation_probe", "Sandbox isolation probe", iso_ok, msg, iso)
+PY
+}
+
+check_webhook() {
+  if [[ -z "${WEBHOOK_EXTERNAL_CMD}" ]]; then
+    add_check "webhook_reachability" "Webhook reachability" false \
+      "No external webhook probe configured for ${WEBHOOK_URL:-the webhook endpoint}; inbound reachability is unverified." \
+      "{}"
+    return
+  fi
+  local out rc
+  set +e
+  # shellcheck disable=SC2086
+  out="$(eval "${WEBHOOK_EXTERNAL_CMD}" 2>&1)"
+  rc=$?
+  set -e
+  if [[ "${rc}" -eq 0 && ( -z "${out}" || "${out}" == *200* || "${out}" == *ok* ) ]]; then
+    add_check "webhook_reachability" "Webhook reachability" true \
+      "External webhook probe succeeded." "{\"rc\":0}"
+    return
+  fi
+  add_check "webhook_reachability" "Webhook reachability" false \
+    "External webhook probe failed (exit ${rc})." "{\"rc\":${rc}}"
+}
+
+check_worker_fallback() {
+  local cmd="${WORKER_LOGS_CMD}"
+  if [[ -z "${cmd}" ]]; then
+    cmd="${DOCKER_BIN} logs kodus-worker-prod"
+  fi
+  local out rc
+  set +e
+  # shellcheck disable=SC2086
+  out="$(eval "${cmd}" 2>&1)"
+  rc=$?
+  set -e
+  if [[ "${rc}" -ne 0 ]]; then
+    add_check "worker_fallback" "Worker template fallback" false \
+      "Cannot read worker logs to grep for '${WORKER_FALLBACK_NEEDLE}'." "{\"rc\":${rc}}"
+    return
+  fi
+  if printf '%s\n' "${out}" | grep -F -q "${WORKER_FALLBACK_NEEDLE}"; then
+    add_check "worker_fallback" "Worker template fallback" false \
+      "Worker logs contain '${WORKER_FALLBACK_NEEDLE}' (usedTemplate=false)." "{}"
+  else
+    add_check "worker_fallback" "Worker template fallback" true \
+      "Worker logs do not contain '${WORKER_FALLBACK_NEEDLE}'." "{}"
+  fi
+}
+
+write_report() {
+  local passed="$1" ts
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  mkdir -p "$(dirname "${REPORT_PATH}")"
+  python3 - "${REPORT_PATH}" "${ts}" "${passed}" "${CHECKS_STATE}" "${FAILURES_STATE}" <<'PY'
+import json
+import os
+import sys
+
+report_path, timestamp, passed, checks_path, failures_path = sys.argv[1:6]
+report = {
+    "version": 1,
+    "timestamp": timestamp,
+    "passed": passed == "true",
+    "checks": json.load(open(checks_path, encoding="utf-8")),
+    "failures": json.load(open(failures_path, encoding="utf-8")),
+}
+with open(report_path, "w", encoding="utf-8") as handle:
+    json.dump(report, handle, indent=2)
+    handle.write("\n")
+os.chmod(report_path, 0o644)
+print("qops-doctor: " + ("all checks passed" if report["passed"] else f"{len(report['failures'])} failure(s)"))
+for item in report["failures"]:
+    print(f"FAIL: {item}")
+PY
+}
+
+main() {
+  set +e
+  check_preflight
+  check_units
+  check_hugepages
+  check_nbd_in_use
+  check_nbd_ko_newest
+  check_disk
+  check_template_store
+  check_http_named "kodus_web_health" "Kodus web health" "${KODUS_WEB_HEALTH}"
+  check_http_named "kodus_api_health" "Kodus api health" "${KODUS_API_HEALTH}"
+  check_http_named "kodus_webhooks_health" "Kodus webhooks health" "${KODUS_WEBHOOKS_HEALTH}"
+  check_rabbitmq
+  check_smoke_and_isolation
+  check_webhook
+  check_worker_fallback
+  set -e
+
+  local overall
+  overall="$(python3 - "${FAILURES_STATE}" <<'PY'
+import json
+import sys
+failures = json.load(open(sys.argv[1], encoding="utf-8"))
+print("true" if not failures else "false")
+PY
+)"
+  write_report "${overall}"
+  if [[ "${overall}" == "true" ]]; then
+    exit 0
+  fi
+  exit 1
+}
+
+main "$@"

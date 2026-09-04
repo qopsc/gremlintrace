@@ -78,7 +78,7 @@ assert isinstance(report["checks"], list)
 assert isinstance(report["failures"], list)
 assert len(report["failures"]) >= 3
 failed_ids = {c["id"] for c in report["checks"] if not c["passed"]}
-for expected in ("resources", "glibc", "kernel_nbd", "egress"):
+for expected in ("resources", "glibc", "kernel_nbd", "egress", "isolation_targets", "webhook_probe_config"):
     assert expected in failed_ids, expected
 print("ok")
 PY
@@ -221,7 +221,7 @@ extra_raw = sys.argv[3]
 merged = {}
 for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
     merged.update(yaml.safe_load(path.read_text()) or {})
-for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores", "e2b_services", "e2b_templates", "traefik"):
+for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor"):
     defaults = root / f"ansible/roles/{role}/defaults/main.yml"
     if defaults.is_file():
         merged.update(yaml.safe_load(defaults.read_text()) or {})
@@ -333,7 +333,7 @@ def render_template(template_rel: str, extra: dict | None = None) -> str:
     import yaml
     for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
         merged.update(yaml.safe_load(path.read_text()) or {})
-    for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores", "e2b_services", "e2b_templates", "traefik"):
+    for role in ("preflight", "common", "host_firewall", "docker", "e2b_host", "e2b_datastores", "e2b_services", "e2b_templates", "traefik", "kodus", "doctor"):
         defaults = root / f"ansible/roles/{role}/defaults/main.yml"
         if defaults.is_file():
             merged.update(yaml.safe_load(defaults.read_text()) or {})
