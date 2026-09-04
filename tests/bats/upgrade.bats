@@ -276,6 +276,7 @@ print("ok")
 
 @test "upgrade.yml rejects kodus_image_tag=latest" {
   run ansible-playbook --check -i "${INVENTORY}" "${UPGRADE}" \
+    --extra-vars "ansible_become=false" \
     --extra-vars "kodus_image_tag=latest"
   [ "$status" -ne 0 ]
   [[ "$output" == *"never latest"* || "$output" == *"latest"* ]]

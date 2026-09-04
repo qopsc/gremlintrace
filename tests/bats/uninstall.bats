@@ -15,7 +15,7 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q 'qops_uninstall_confirm: false' "${REPO_ROOT}/ansible/group_vars/all.yml"
   grep -q 'qops_uninstall_destroy_data: false' "${REPO_ROOT}/ansible/group_vars/all.yml"
-  run ansible-playbook --check -i "${INVENTORY}" "${UNINSTALL_PB}"
+  run ansible-playbook --check -i "${INVENTORY}" "${UNINSTALL_PB}" --extra-vars "ansible_become=false"
   [ "$status" -ne 0 ]
   [[ "$output" == *"qops_uninstall_confirm"* ]]
 }
