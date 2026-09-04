@@ -5,14 +5,24 @@ load "${BATS_TEST_DIRNAME}/helpers/common.bash"
 setup() {
   TEST_TMPDIR="$(mktemp -d)"
   export TEST_TMPDIR
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
 
-  STUB_BIN="${TEST_TMPDIR}/bin"
+  export STUB_BIN="${TEST_TMPDIR}/bin"
   mkdir -p "${STUB_BIN}"
 
   export BOOTSTRAP_STUB_LOG="${TEST_TMPDIR}/ansible-playbook.log"
   export BOOTSTRAP_ORDER_LOG="${TEST_TMPDIR}/order.log"
   cp "${BATS_TEST_DIRNAME}/helpers/ansible-playbook" "${STUB_BIN}/ansible-playbook"
   chmod +x "${STUB_BIN}/ansible-playbook"
+
+  cat >"${STUB_BIN}/pipx" <<'EOF'
+#!/bin/bash
+if [[ "${1:-}" == "environment" && "${2:-}" == "--value" && "${3:-}" == "PIPX_BIN_DIR" ]]; then
+  printf '%s\n' "${STUB_BIN}"
+fi
+EOF
+  chmod +x "${STUB_BIN}/pipx"
 
   # Exercise the Linux-only entry point consistently on the macOS control host.
   cat >"${STUB_BIN}/uname" <<'EOF'

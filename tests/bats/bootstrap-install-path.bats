@@ -7,6 +7,8 @@ setup() {
   BOOTSTRAP="${REPO_ROOT}/bootstrap.sh"
   TEST_TMPDIR="$(mktemp -d)"
   export TEST_TMPDIR
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
 
   STUB_BIN="${TEST_TMPDIR}/bin"
   PIPX_BIN="${TEST_TMPDIR}/pipx-bin"
@@ -140,6 +142,9 @@ assert_order_equals() {
 }
 
 @test "pipx missing triggers apt-get and sudo in documented order" {
+  if [[ ! -f /etc/os-release ]]; then
+    skip "package-manager bootstrap path requires a Linux /etc/os-release"
+  fi
   /bin/rm -f "${STUB_BIN}/pipx"
   /bin/cp "${TEST_TMPDIR}/pipx.stub" "${STUB_BIN}/pipx.template"
   /bin/cat >"${STUB_BIN}/apt-get" <<'EOF'
