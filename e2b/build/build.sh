@@ -19,6 +19,7 @@ SRC=""
 DRY_RUN=false
 COMPILE=false
 CLONE_DIR=""
+BUILD_IMAGE=""
 PATCH_FILES=()
 GOWORK_GO_VERSION=""
 
@@ -59,7 +60,19 @@ die() {
 
 cleanup() {
   if [[ -n "${CLONE_DIR}" && -d "${CLONE_DIR}" ]]; then
-    rm -rf "${CLONE_DIR}"
+    # The build container runs as root and may create root-owned directories
+    # in the bind-mounted checkout. Let that same image remove its contents
+    # before the host removes the mktemp parent.
+    if [[ -n "${BUILD_IMAGE}" ]] && command -v "${DOCKER}" >/dev/null 2>&1; then
+      "${DOCKER}" run --rm --platform linux/amd64 \
+        --entrypoint /bin/sh \
+        -v "${CLONE_DIR}:/src" \
+        "${BUILD_IMAGE}" \
+        -c 'rm -rf /src/* /src/.[!.]* /src/..?*' >/dev/null 2>&1 || true
+    fi
+    if ! rm -rf "${CLONE_DIR}"; then
+      log "warning: could not fully remove temporary E2B checkout: ${CLONE_DIR}"
+    fi
   fi
 }
 trap cleanup EXIT
@@ -241,6 +254,7 @@ require_docker() {
 run_build_container() {
   local src="$1"
   local image="codereviewer-e2b-build:${E2B_GO_VERSION}"
+  BUILD_IMAGE="${image}"
 
   require_docker
   mkdir -p "${DIST_DIR}"
