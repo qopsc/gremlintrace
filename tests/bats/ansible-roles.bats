@@ -126,9 +126,13 @@ PY
 }
 
 @test "rendered nftables ruleset validates with nft -c -f" {
+  if ! command -v nft >/dev/null 2>&1; then
+    skip "nftables validation requires the nft executable"
+  fi
+  nft_bin="$(command -v nft)"
   nft_out="${BATS_TMPDIR}/qops.nft"
   "${RENDER}" ansible/roles/host_firewall/templates/qops.nft.j2 "${VARS}" >"${nft_out}"
-  run sudo /sbin/nft -c -f "${nft_out}"
+  run sudo "${nft_bin}" -c -f "${nft_out}"
   [ "$status" -eq 0 ]
   ! grep -q 'flush ruleset' "${nft_out}"
 }
