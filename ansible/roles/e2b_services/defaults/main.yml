@@ -56,6 +56,7 @@ e2b_services_volume_token_enabled: false
 e2b_services_max_parallel_memfile_snapshotting: 2
 e2b_services_orchestrator_lock_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}/orchestrator.lock"
 e2b_services_orchestrator_base_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}"
+e2b_services_force_stop_marker: /orchestrator/force-stop
 e2b_services_template_storage_path: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}/storage"
 e2b_services_build_cache_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}/build"
 e2b_services_host_envd_path: "{{ e2b_services_envd_dest }}"
@@ -70,6 +71,8 @@ e2b_services_sandbox_access_token_hash_seed: ""
 
 e2b_services_dist_local_path: ""
 e2b_services_dist_download_url: ""
+e2b_services_dist_checksum_path: ""
+e2b_services_dist_checksum_url: ""
 e2b_services_dist_cache_dir: /var/cache/qops
 e2b_services_release_base_url_effective: >-
   {{ qops_release_base_url if (qops_release_base_url | default('') | length > 0)

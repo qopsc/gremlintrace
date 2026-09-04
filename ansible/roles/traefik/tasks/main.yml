@@ -274,6 +274,8 @@
       /usr/local/lib/qops/install-traefik-acme-env.sh
       {{ common_qops_secrets_file }}
       {{ traefik_acme_env_file }}
+      {{ tls_acme_dns_provider }}
+      {{ traefik_acme_env_keys | join(',') }}
   when: tls_mode == "acme_dns"
   register: traefik_acme_env
   changed_when: (traefik_acme_env.stdout | trim) == "installed"

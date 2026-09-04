@@ -209,6 +209,7 @@ per_file = {
         "ARTIFACTS_REGISTRY_PROVIDER=Local",
         "OTEL_COLLECTOR_GRPC_ENDPOINT=127.0.0.1:4317",
         "REDIS_URL=127.0.0.1:6379",
+        "POSTGRES_CONNECTION_STRING=postgres://postgres:pg-secret@127.0.0.1:5433/e2b?sslmode=disable",
         "CLICKHOUSE_CONNECTION_STRING=clickhouse://ch-user:ch-secret@127.0.0.1:9000/default",
         "LOKI_URL=unset",
         "SANDBOX_ACCESS_TOKEN_HASH_SEED=hash-seed-value",
@@ -252,12 +253,12 @@ per_file = {
         "LOKI_URL=unset",
         "API_INTERNAL_GRPC_ADDRESS=127.0.0.1:5009",
         "OTEL_COLLECTOR_GRPC_ENDPOINT=127.0.0.1:4317",
+        "SANDBOX_ACCESS_TOKEN_HASH_SEED=hash-seed-value",
     },
 }
 forbidden = {
     "orchestrator.env.j2": (
         "LOCAL_ORCHESTRATOR_ADDRESS=",
-        "POSTGRES_CONNECTION_STRING=",
         "API_INTERNAL_GRPC_ADDRESS=",
         "AUTH_PROVIDER_CONFIG=",
         "VOLUME_TOKEN_ENABLED=",
@@ -272,7 +273,6 @@ forbidden = {
     "client-proxy.env.j2": (
         "POSTGRES_CONNECTION_STRING=",
         "CLICKHOUSE_CONNECTION_STRING=",
-        "SANDBOX_ACCESS_TOKEN_HASH_SEED=",
         "FORCE_STOP=",
         "ORCHESTRATOR_SERVICES=",
         "LOCAL_ORCHESTRATOR_ADDRESS=",
@@ -344,23 +344,23 @@ EOF
   chmod +x "${stub}/psql-empty" "${stub}/psql-exists"
 
   : >"${seed_ran}"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-exists"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-exists"
   [ "$status" -ne 0 ]
   [ "$(cat "${seed_ran}")" = "" ]
   [[ "$output" == *"unrecoverable"* ]]
 
   printf 'E2B_API_KEY=e2b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' >"${secrets}"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-exists"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-exists"
   [ "$status" -eq 0 ]
   [ "$(cat "${seed_ran}")" = "" ]
   [[ "$output" == "already-seeded" ]]
   [[ "$output" != *"e2b_0123456789abcdef"* ]]
 
   printf 'E2B_API_KEY=\n' >"${secrets}"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-empty"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-empty"
   [ "$status" -eq 0 ]
   [ -s "${seed_ran}" ]
   [[ "$output" == "seeded" ]]
@@ -371,8 +371,8 @@ EOF
   marker="${BATS_TMPDIR}/already-seeded"
   : >"${marker}"
   : >"${seed_ran}"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-empty"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-empty"
   [ "$status" -eq 0 ]
   [ -s "${seed_ran}" ]
 }
@@ -416,6 +416,19 @@ EOF
   render_with_defaults ansible/roles/traefik/templates/dynamic-tls-provided.yml.j2 \
     '{"tls_mode":"provided","tls_cert_path":"/etc/ssl/qops.crt","tls_key_path":"/etc/ssl/qops.key"}' \
     >"${tls_provided}"
+
+  run python3 - "${http_provided}" <<'PY'
+import sys
+import yaml
+
+routers = yaml.safe_load(open(sys.argv[1]))["http"]["routers"]
+assert len(routers) == 5
+for name, router in routers.items():
+    assert router["tls"] == {}, (name, router.get("tls"))
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 
   grep -q 'address: "0.0.0.0:80"' "${acme}"
   grep -q 'address: "0.0.0.0:443"' "${acme}"
@@ -549,6 +562,73 @@ PY
   [ "$status" -ne 0 ]
 }
 
+@test "dist archive sidecar checksum is independent of inner SHA256SUMS" {
+  dist_version="6e4ce14"
+  archive="${BATS_TMPDIR}/e2b-${dist_version}.tar.gz"
+  bash "${REPO_ROOT}/tests/fixtures/build-e2b-dist-fixture.sh" "${archive}" "${dist_version}"
+  sidecar="${archive}.sha256"
+  (cd "$(dirname "${archive}")" && sha256sum "$(basename "${archive}")") >"${sidecar}"
+
+  run bash -c 'cd "$1" && sha256sum --check "$2"' _ \
+    "$(dirname "${archive}")" "$(basename "${sidecar}")"
+  [ "$status" -eq 0 ]
+
+  printf 'corrupted\n' >>"${archive}"
+  run bash -c 'cd "$1" && sha256sum --check "$2"' _ \
+    "$(dirname "${archive}")" "$(basename "${sidecar}")"
+  [ "$status" -ne 0 ]
+  grep -Fq 'e2b_services_dist_effective_checksum_url' \
+    "${REPO_ROOT}/ansible/roles/e2b_services/tasks/main.yml"
+}
+
+@test "goose migration wrapper keeps the connection string out of argv" {
+  script="${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-goose-migrate.sh"
+  stub="${BATS_TMPDIR}/goose"
+  log="${BATS_TMPDIR}/goose.log"
+  migrations="${BATS_TMPDIR}/migrations"
+  mkdir -p "${migrations}"
+  cat >"${stub}" <<EOF
+#!/usr/bin/env bash
+if [[ -n "\${GOOSE_DBSTRING:-}" ]]; then
+  echo env-ok >>"${log}"
+fi
+if [[ "\$*" == *postgres://* ]]; then
+  echo argv-connection-string >>"${log}"
+fi
+case "\$*" in
+  *status) echo "no migrations" ;;
+  *) echo "no migrations" ;;
+  esac
+EOF
+  chmod +x "${stub}"
+  : >"${log}"
+  run env GOOSE_DBSTRING='postgres://postgres:db-secret@127.0.0.1/e2b' \
+    bash "${script}" "${stub}" postgres "${migrations}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "already-current" ]
+  [ "$(grep -c '^env-ok$' "${log}")" -eq 2 ]
+  ! grep -q 'connection-string' "${log}"
+}
+
+@test "force-stop helper updates the startup env and shutdown marker" {
+  script="${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-set-force-stop.sh"
+  envfile="${BATS_TMPDIR}/orchestrator.env"
+  marker_dir="${BATS_TMPDIR}/orchestrator"
+  marker="${marker_dir}/force-stop"
+  mkdir -p "${marker_dir}"
+  printf 'NODE_ID=node-a\nFORCE_STOP=false\n' >"${envfile}"
+
+  run env QOPS_FORCE_STOP_MARKER="${marker}" bash "${script}" "${envfile}" true
+  [ "$status" -eq 0 ]
+  grep -q '^FORCE_STOP=true$' "${envfile}"
+  [ -f "${marker}" ]
+
+  run env QOPS_FORCE_STOP_MARKER="${marker}" bash "${script}" "${envfile}" false
+  [ "$status" -eq 0 ]
+  grep -q '^FORCE_STOP=false$' "${envfile}"
+  [ ! -e "${marker}" ]
+}
+
 @test "template source install is unchanged on a second run" {
   src="${BATS_TMPDIR}/templates-src-idem"
   dest="${BATS_TMPDIR}/templates-dest-idem"
@@ -655,8 +735,8 @@ EOF
 exit 0
 EOF
   chmod +x "${stub}/e2b-seed" "${stub}/psql-empty"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-empty"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-empty"
   [ "$status" -ne 0 ]
   [[ "$output" == *"did not print a Team API Key"* || "$output" == *"failed to parse"* ]]
   if [[ ! -f "${E2B_SEEDED_KEY_FILE}.raw" ]]; then
@@ -691,8 +771,8 @@ EOF
 exit 0
 EOF
   chmod +x "${stub}/e2b-seed" "${stub}/psql-empty"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-empty"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-empty"
   [ "$status" -ne 0 ]
   [ "$(cat "${E2B_SEEDED_KEY_FILE}")" = "e2b_0123456789abcdef0123456789abcdef01234567" ]
   ! grep -q 'e2b_0123456789abcdef0123456789abcdef01234567' "${secrets}"
@@ -725,15 +805,15 @@ exit 2
 EOF
   chmod +x "${stub}/e2b-seed" "${stub}/psql-weird" "${stub}/psql-connfail"
   : >"${seed_ran}"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-weird"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-weird"
   [ "$status" -ne 0 ]
   [ "$(cat "${seed_ran}")" = "" ]
   [[ "$output" == *"unexpected result"* ]]
   ! grep -q 'e2b_0123456789abcdef' "${secrets}"
 
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-connfail"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-connfail"
   [ "$status" -ne 0 ]
   [ "$(cat "${seed_ran}")" = "" ]
   [[ "$output" == *"refusing to seed"* ]]
@@ -760,8 +840,8 @@ exit 0
 EOF
   chmod +x "${stub}/e2b-seed" "${stub}/psql-exists"
   : >"${seed_ran}"
-  run bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" \
-    "postgres://postgres@127.0.0.1/e2b" "${stub}/psql-exists"
+  run env POSTGRES_CONNECTION_STRING="postgres://postgres@127.0.0.1/e2b" \
+    bash "${script}" admin@example.com "${stub}/e2b-seed" "${secrets}" "${stub}/psql-exists"
   [ "$status" -eq 0 ]
   [ "$(cat "${seed_ran}")" = "" ]
   [[ "$output" == "seeded" ]]
@@ -821,6 +901,13 @@ state = owners_for(traefik_dirs, "traefik_state_dir")
 assert state, "state dir task missing"
 assert all(owner == "{{ traefik_user }}" for owner, _mode, _paths in state)
 assert all(mode == "0750" for _owner, mode, _paths in state)
+
+working = owners_for(e2b_dirs, "e2b_services_template_storage_path") + owners_for(
+    e2b_dirs, "e2b_services_build_cache_path"
+)
+assert working, "e2b working directory tasks missing"
+assert all(owner == "{{ e2b_services_user }}" for owner, _mode, _paths in working)
+assert all(mode == "0750" for _owner, mode, _paths in working)
 
 # Second-run stability: both roles declare the same owner for /var/cache/qops.
 traefik_cache_owners = {owner for owner, _mode, _paths in owners_for(traefik_dirs, "traefik_cache_dir")}
@@ -1082,13 +1169,25 @@ E2B_API_KEY=e2b_0123456789abcdef0123456789abcdef01234567
 E2B_POSTGRES_PASSWORD=pg-secret
 SANDBOX_ACCESS_TOKEN_HASH_SEED=hash-seed
 CF_DNS_API_TOKEN=cf-token
+AWS_ACCESS_KEY_ID=aws-id
+AWS_SECRET_ACCESS_KEY=aws-secret
+UNRELATED_SECRET=do-not-copy
 EOF
-  run bash "${script}" "${secrets}" "${dest}"
+  run bash "${script}" "${secrets}" "${dest}" cloudflare
   [ "$status" -eq 0 ]
   grep -q 'CF_DNS_API_TOKEN=cf-token' "${dest}"
+  ! grep -q 'AWS_' "${dest}"
+  ! grep -q 'UNRELATED_SECRET' "${dest}"
   ! grep -q 'E2B_API_KEY' "${dest}"
   ! grep -q 'E2B_POSTGRES_PASSWORD' "${dest}"
   ! grep -q 'SANDBOX_ACCESS_TOKEN_HASH_SEED' "${dest}"
+
+  route53_dest="${BATS_TMPDIR}/traefik-route53.env"
+  run bash "${script}" "${secrets}" "${route53_dest}" route53
+  [ "$status" -eq 0 ]
+  grep -q 'AWS_ACCESS_KEY_ID=aws-id' "${route53_dest}"
+  grep -q 'AWS_SECRET_ACCESS_KEY=aws-secret' "${route53_dest}"
+  ! grep -q 'CF_DNS_API_TOKEN' "${route53_dest}"
 }
 
 @test "rendered e2b-api router has no buffering middleware" {

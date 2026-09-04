@@ -13,8 +13,8 @@ set -euo pipefail
 EMAIL="${1:?team email required}"
 SEED_BIN="${2:?e2b-seed binary required}"
 SECRETS_FILE="${3:?secrets file required}"
-POSTGRES_CONNECTION_STRING="${4:?postgres connection string required}"
-shift 4
+POSTGRES_CONNECTION_STRING="${POSTGRES_CONNECTION_STRING:?POSTGRES_CONNECTION_STRING environment variable required}"
+shift 3
 
 if [[ "$#" -lt 1 ]]; then
   echo "psql command required" >&2

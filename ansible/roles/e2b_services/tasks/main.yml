@@ -27,23 +27,7 @@
     - e2b-apply-limits.sh
     - e2b-wait-health.sh
     - e2b-ensure-node-id.sh
-  tags:
-    - e2b_services
-
-- name: Ensure e2b service directories exist
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-  loop:
-    - "{{ e2b_services_install_prefix }}"
-    - "{{ e2b_services_config_dir }}"
-    - "{{ e2b_services_template_storage_path }}"
-    - "{{ e2b_services_build_cache_path }}"
-    - "{{ e2b_services_dist_cache_dir }}"
-    - "{{ e2b_host_fc_envd_dir }}"
+    - e2b-set-force-stop.sh
   tags:
     - e2b_services
 
@@ -62,6 +46,34 @@
     shell: /usr/sbin/nologin
     home: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}"
     create_home: false
+  tags:
+    - e2b_services
+
+- name: Ensure root-owned e2b service directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ e2b_services_install_prefix }}"
+    - "{{ e2b_services_config_dir }}"
+    - "{{ e2b_services_dist_cache_dir }}"
+    - "{{ e2b_host_fc_envd_dir }}"
+  tags:
+    - e2b_services
+
+- name: Ensure e2b service working directories are writable by e2b
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ e2b_services_user }}"
+    group: "{{ e2b_services_group }}"
+    mode: "0750"
+  loop:
+    - "{{ e2b_services_template_storage_path }}"
+    - "{{ e2b_services_build_cache_path }}"
   tags:
     - e2b_services
 
@@ -84,15 +96,43 @@
   tags:
     - e2b_services
 
+- name: Resolve E2B dist checksum path and URL
+  ansible.builtin.set_fact:
+    e2b_services_dist_effective_checksum_path: >-
+      {{ e2b_services_dist_checksum_path if (e2b_services_dist_checksum_path | length > 0)
+         else (e2b_services_dist_archive_path ~ '.sha256') }}
+    e2b_services_dist_effective_checksum_url: >-
+      {{ e2b_services_dist_checksum_url if (e2b_services_dist_checksum_url | length > 0)
+         else (e2b_services_dist_effective_url ~ '.sha256'
+               if e2b_services_dist_effective_url | length > 0 else '') }}
+  tags:
+    - e2b_services
+
 - name: Download E2B dist archive
   ansible.builtin.get_url:
     url: "{{ e2b_services_dist_effective_url }}"
     dest: "{{ e2b_services_dist_archive_path }}"
     mode: "0644"
     force: false
+  register: e2b_services_dist_download
+  failed_when: false
   when:
     - e2b_services_dist_local_path | length == 0
     - e2b_services_dist_effective_url | length > 0
+  tags:
+    - e2b_services
+
+- name: Download E2B dist checksum
+  ansible.builtin.get_url:
+    url: "{{ e2b_services_dist_effective_checksum_url }}"
+    dest: "{{ e2b_services_dist_effective_checksum_path }}"
+    mode: "0644"
+    force: false
+  register: e2b_services_dist_checksum_download
+  failed_when: false
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - e2b_services_dist_effective_checksum_url | length > 0
   tags:
     - e2b_services
 
@@ -111,6 +151,38 @@
       qops_release_base_url, or qops_github_repository
       (https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/e2b-<e2b_dist_version>.tar.gz).
   when: not e2b_services_dist_archive_stat.stat.exists
+  tags:
+    - e2b_services
+
+- name: Check whether E2B dist checksum is available
+  ansible.builtin.stat:
+    path: "{{ e2b_services_dist_effective_checksum_path }}"
+  register: e2b_services_dist_checksum_stat
+  tags:
+    - e2b_services
+
+- name: Fail when downloaded E2B dist checksum is missing
+  ansible.builtin.fail:
+    msg: >-
+      E2B dist checksum not found at {{ e2b_services_dist_effective_checksum_path }}.
+      The release must publish e2b-{{ e2b_dist_version }}.tar.gz.sha256 alongside
+      the dist archive.
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - not e2b_services_dist_checksum_stat.stat.exists
+  tags:
+    - e2b_services
+
+- name: Verify E2B dist archive checksum
+  ansible.builtin.command:
+    argv:
+      - sha256sum
+      - --check
+      - "{{ e2b_services_dist_effective_checksum_path | basename }}"
+    chdir: "{{ e2b_services_dist_effective_checksum_path | dirname }}"
+  register: e2b_services_dist_archive_checksum
+  changed_when: false
+  when: e2b_services_dist_checksum_stat.stat.exists
   tags:
     - e2b_services
 
@@ -290,8 +362,9 @@
       /usr/local/lib/qops/e2b-goose-migrate.sh
       {{ e2b_services_goose_bin }}
       postgres
-      {{ e2b_services_postgres_connection_string }}
       {{ e2b_services_postgres_migrations_dir }}
+  environment:
+    GOOSE_DBSTRING: "{{ e2b_services_postgres_connection_string }}"
   register: e2b_services_goose_pg
   changed_when: (e2b_services_goose_pg.stdout | trim) == "applied"
   no_log: true
@@ -304,8 +377,9 @@
       /usr/local/lib/qops/e2b-goose-migrate.sh
       {{ e2b_services_goose_bin }}
       clickhouse
-      {{ e2b_services_clickhouse_connection_string }}
       {{ e2b_services_clickhouse_migrations_dir }}
+  environment:
+    GOOSE_DBSTRING: "{{ e2b_services_clickhouse_connection_string }}"
   register: e2b_services_goose_ch
   changed_when: (e2b_services_goose_ch.stdout | trim) == "applied"
   no_log: true
@@ -330,7 +404,6 @@
       {{ e2b_admin_email }}
       {{ e2b_services_seed_bin }}
       {{ common_qops_secrets_file }}
-      {{ e2b_services_postgres_connection_string }}
       /usr/local/lib/qops/e2b-psql.sh
       {{ e2b_datastores_compose_file }}
       {{ common_qops_secrets_file }}
@@ -339,6 +412,7 @@
       {{ e2b_datastores_postgres_db }}
   environment:
     E2B_SEEDED_KEY_FILE: "{{ e2b_services_seeded_key_file }}"
+    POSTGRES_CONNECTION_STRING: "{{ e2b_services_postgres_connection_string }}"
   register: e2b_services_seed
   changed_when: (e2b_services_seed.stdout | trim) == "seeded"
   no_log: true

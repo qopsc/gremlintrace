@@ -13,10 +13,11 @@ Patches in this directory are applied with `git apply` in CI against the pinned 
 ## Policy
 
 - Keep patches **minimal** — every patch must be rebased when `e2b_pin` bumps.
-- The directory starts empty; add patches only when upstream behaviour must change.
+- Add patches only when upstream behaviour must change; the force-stop marker
+  patch is required because upstream parses `FORCE_STOP` only at process start.
 - Do not fork `e2b-dev/infra`; all source changes go here.
 
-## First patch candidate
+## Future patch candidate
 
 Upstream `packages/shared/pkg/featureflags/flags.go` defines:
 

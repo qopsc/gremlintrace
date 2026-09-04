@@ -10,6 +10,7 @@ traefik_group: traefik
 traefik_state_dir: /var/lib/traefik
 traefik_acme_storage: "{{ traefik_state_dir }}/acme.json"
 traefik_acme_env_file: /etc/qops/traefik-acme.env
+traefik_acme_env_keys: []
 traefik_cache_dir: /var/cache/qops
 traefik_local_path: ""
 traefik_download_url: ""

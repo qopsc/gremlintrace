@@ -7,7 +7,7 @@ orchestrator / api / client-proxy under systemd.
 
 | Path | Purpose |
 |---|---|
-| `/usr/local/lib/e2b/<e2b_dist_version>` | Unpacked dist (SHA256SUMS verified before install) |
+| `/usr/local/lib/e2b/<e2b_dist_version>` | Unpacked dist (external archive checksum and inner SHA256SUMS verified before install) |
 | `/usr/local/lib/e2b/current` | Symlink to the installed version |
 | `/fc-envd/envd` | envd binary copied from the dist |
 | `/etc/qops/e2b/orchestrator.env` | Orchestrator env (mode `0600`) |
@@ -18,6 +18,10 @@ orchestrator / api / client-proxy under systemd.
 
 Env files carry database passwords and `SANDBOX_ACCESS_TOKEN_HASH_SEED`. Tasks that
 read or render them use `no_log`.
+
+Release-sourced dist archives must have the adjacent
+`e2b-<e2b_dist_version>.tar.gz.sha256` asset. Local archives may provide the same
+sidecar next to the archive for equivalent verification.
 
 ## Bind addresses (host firewall, not an E2B patch)
 
@@ -43,8 +47,10 @@ policy next to the service definition.
 | `e2b-client-proxy.service` | `e2b` | `After=e2b-orchestrator` |
 
 `FORCE_STOP` is written to `orchestrator.env` from `e2b_services_orchestrator_force_stop`
-(default `false`). `upgrade.yml` sets it `true` before `systemctl stop` so Firecracker
-processes in `/sys/fs/cgroup/e2b/sbx-*` are not drained for up to 35 minutes.
+(default `false`). The pinned dist also honors
+`/orchestrator/force-stop` when it receives SIGTERM; `upgrade.yml` writes that
+marker and the env value before `systemctl stop`, so Firecracker processes in
+`/sys/fs/cgroup/e2b/sbx-*` are not drained for up to 35 minutes.
 
 ## Seed and limits
 
