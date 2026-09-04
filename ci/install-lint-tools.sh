@@ -32,6 +32,7 @@ verify_make_check_tools() {
     shellcheck
     bats
     ansible-playbook
+    ansible-galaxy
     python3
     npm
     node
@@ -61,6 +62,9 @@ verify_make_check_tools() {
         ;;
       ansible-playbook)
         ( unset LC_ALL; ansible-playbook --version >/dev/null 2>&1 ) || failed+=("${cmd}")
+        ;;
+      ansible-galaxy)
+        ( unset LC_ALL; ansible-galaxy --version >/dev/null 2>&1 ) || failed+=("${cmd}")
         ;;
       python3)
         python3 --version >/dev/null 2>&1 || failed+=("${cmd}")
@@ -128,6 +132,10 @@ python3 -m pip install --disable-pip-version-check --user -q \
   "ansible-core==$(yaml_get ansible_core_version)" \
   "ansible-lint==$(yaml_get ansible_lint_version)" \
   "yamllint==$(yaml_get yamllint_version)"
+
+ansible-galaxy collection install --force \
+  "ansible.posix:$(yaml_get ansible_posix_version)" \
+  "community.general:$(yaml_get community_general_version)"
 
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

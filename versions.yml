@@ -63,6 +63,8 @@ actionlint_version: "1.7.7"
 actionlint_sha256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
 ansible_core_version: "2.21.3"
 ansible_lint_version: "26.8.0"
+ansible_posix_version: "2.1.0"
+community_general_version: "10.7.8"
 yamllint_version: "1.38.0"
 
 shellcheck_apt_version: "0.9.0-1"

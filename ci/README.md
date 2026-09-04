@@ -137,7 +137,8 @@ rebuilds; `upgrade.yml` (a later task) handles that via `env_builds.envd_version
 Faithful CI reproduction of local developer checks:
 
 1. `ci/install-lint-tools.sh` — installs pinned `actionlint`, `ansible-core`,
-   `ansible-lint`, `yamllint`, `shellcheck`, and `bats` (versions from
+   `ansible-lint`, the `ansible.posix` and `community.general` Ansible
+   collections, `yamllint`, `shellcheck`, and `bats` (versions from
    `versions.yml`; actionlint tarball verified against `actionlint_sha256`).
 2. `actions/setup-node` with `node_ci_version` from `versions.yml`.
 3. `make check` — `yamllint`, `ansible-lint`, `shellcheck`, Ansible playbook
