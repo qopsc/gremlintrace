@@ -18,6 +18,8 @@ busybox_version: "1.36.1"
 firecracker_sha256: "ef22aec7cbffcf6cc44a8436a4db79f9e6fe5c52218c81af321dd20f10ad6e5d"
 kernel_sha256: "1982f8d5f1bc1680a36b0cdf126f605834b1633bba200d3281bccd53b86ff9ee"
 busybox_sha256: "d7cce939adb09a41a22a5f846d22ba8d576b38dbb2b46a5c77a3a3e27ec52520"
+e2b_force_stop_patch_filename: "0001-force-stop-marker.patch"
+e2b_force_stop_patch_sha256: "ee6e4144cd1ae5a5ff6219a2c68fe90a3e893bb28a06cc8dd9bc30004e2789fa"
 
 # From upstream packages/envd/pkg/version.go at e2b_pin (also stamped into BUILD_INFO by the build pipeline).
 envd_version: "0.7.0"

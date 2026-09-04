@@ -53,7 +53,13 @@ make_dir() {
   local mtime="$2"
   mkdir -p "${STORE}/${name}"
   printf 'blob\n' >"${STORE}/${name}/memfile"
-  touch -d "@${mtime}" "${STORE}/${name}"
+  python3 - "${STORE}/${name}" "${mtime}" <<'PY'
+import os
+import sys
+
+path, mtime = sys.argv[1], int(sys.argv[2])
+os.utime(path, (mtime, mtime))
+PY
 }
 
 query_file() {
@@ -434,24 +440,30 @@ setup_lock_spans_rmtree() {
   export QOPS_GC_RMTREE_HOLD="${rmtree_hold}"
   lockcmd="${BATS_TMPDIR}/flock-lock.sh"
   cat >"${lockcmd}" <<EOF
-#!/usr/bin/env bash
-exec 9>"${lockfile}"
-flock -w 60 9 || exit 1
-printf '%s\n' __QOPS_E2B_GC_LOCK_OK__
-touch "${lock_held}"
-cat >/dev/null
+#!/usr/bin/env python3
+import fcntl
+import sys
+from pathlib import Path
+
+with open("${lockfile}", "w", encoding="utf-8") as handle:
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    print("__QOPS_E2B_GC_LOCK_OK__", flush=True)
+    Path("${lock_held}").touch()
+    sys.stdin.read()
 EOF
   chmod +x "${lockcmd}"
   inserter="${BATS_TMPDIR}/inserter.sh"
   cat >"${inserter}" <<EOF
-#!/usr/bin/env bash
-exec 8>"${lockfile}"
-flock -w 60 8 || exit 1
-if [[ -d "${STORE}/raced" ]]; then
-  printf 'INSERTED_WHILE_DIR_EXISTS\n' >"${insert_result}"
-else
-  printf 'DIR_GONE\n' >"${insert_result}"
-fi
+#!/usr/bin/env python3
+import fcntl
+from pathlib import Path
+
+with open("${lockfile}", "w", encoding="utf-8") as handle:
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    if Path("${STORE}/raced").is_dir():
+        Path("${insert_result}").write_text("INSERTED_WHILE_DIR_EXISTS\n", encoding="utf-8")
+    else:
+        Path("${insert_result}").write_text("DIR_GONE\n", encoding="utf-8")
 EOF
   chmod +x "${inserter}"
   qf="${BATS_TMPDIR}/query-lockfile.sh"
@@ -511,9 +523,12 @@ EOF
   [[ "${got}" == "INSERTED_WHILE_DIR_EXISTS" ]]
 }
 
-@test "assigned build_id protects a dir; snapshots.id does not" {
+@test "all live build references protect dirs; snapshots.id does not" {
   make_dir snap-row-uuid $((NOW - 1000000))
   make_dir live-build-id $((NOW - 1000000))
+  make_dir historical-live-build $((NOW - 1000000))
+  make_dir snapshot-template-build $((NOW - 1000000))
+  make_dir dead-build-id $((NOW - 1000000))
   db="${BATS_TMPDIR}/gc-schema.sqlite"
   rm -f "${db}"
   python3 - "${db}" <<'PY'
@@ -521,12 +536,14 @@ import sqlite3, sys
 conn = sqlite3.connect(sys.argv[1])
 conn.executescript("""
 CREATE TABLE envs (id TEXT PRIMARY KEY, deleted_at TEXT);
-CREATE TABLE snapshots (id TEXT PRIMARY KEY, env_id TEXT);
-CREATE TABLE env_builds (id TEXT PRIMARY KEY);
+CREATE TABLE snapshots (id TEXT PRIMARY KEY, env_id TEXT, base_env_id TEXT);
+CREATE TABLE snapshot_templates (env_id TEXT PRIMARY KEY, build_id TEXT);
+CREATE TABLE env_builds (id TEXT PRIMARY KEY, env_id TEXT);
 CREATE TABLE env_build_assignments (env_id TEXT, build_id TEXT);
 INSERT INTO envs (id, deleted_at) VALUES ('tmpl-live', NULL), ('snap-env', NULL), ('tmpl-dead', '2020-01-01');
-INSERT INTO snapshots (id, env_id) VALUES ('snap-row-uuid', 'snap-env');
-INSERT INTO env_builds (id) VALUES ('live-build-id'), ('dead-build-id');
+INSERT INTO snapshots (id, env_id, base_env_id) VALUES ('snap-row-uuid', 'snap-env', 'tmpl-live');
+INSERT INTO snapshot_templates (env_id, build_id) VALUES ('snap-env', 'snapshot-template-build');
+INSERT INTO env_builds (id, env_id) VALUES ('live-build-id', 'tmpl-live'), ('historical-live-build', 'tmpl-live'), ('dead-build-id', 'tmpl-dead');
 INSERT INTO env_build_assignments (env_id, build_id) VALUES ('tmpl-live', 'live-build-id');
 INSERT INTO env_build_assignments (env_id, build_id) VALUES ('snap-env', 'live-build-id');
 INSERT INTO env_build_assignments (env_id, build_id) VALUES ('tmpl-dead', 'dead-build-id');
@@ -540,6 +557,9 @@ PY
   run run_gc "${GC}" --query-cmd "${QUERY_SH} python3 ${FAKE_PSQL} x x x x x"
   [ "$status" -eq 0 ]
   [ -d "${STORE}/live-build-id" ]
+  [ -d "${STORE}/historical-live-build" ]
+  [ -d "${STORE}/snapshot-template-build" ]
+  [ ! -d "${STORE}/dead-build-id" ]
   [ ! -d "${STORE}/snap-row-uuid" ]
 }
 
@@ -561,3 +581,9 @@ PY
   fi
 }
 
+@test "query SQL includes env builds and snapshot template build references" {
+  grep -q 'env_builds' "${QUERY_SH}"
+  grep -q 'snapshots' "${QUERY_SH}"
+  grep -q 'snapshot_templates' "${QUERY_SH}"
+  grep -q 'base_env_id' "${QUERY_SH}"
+}

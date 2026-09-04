@@ -23,6 +23,10 @@ Release-sourced dist archives must have the adjacent
 `e2b-<e2b_dist_version>.tar.gz.sha256` asset. Local archives may provide the same
 sidecar next to the archive for equivalent verification.
 
+The installed and upgrade candidate archives must also record the pinned
+`e2b_force_stop_patch_filename` and exact `e2b_force_stop_patch_sha256` in
+`BUILD_INFO.patches`; an old artifact with the same `e2b_dist_version` is rejected.
+
 ## Bind addresses (host firewall, not an E2B patch)
 
 The upstream Go binaries **hardcode `0.0.0.0`** by design (not patched):
@@ -62,8 +66,9 @@ Helpers used by `upgrade.yml` / `uninstall.yml`:
 
 | Path | Purpose |
 |---|---|
-| `/usr/local/lib/qops/e2b-assert-dist-pair.sh` | Fail unless `bin/api` ldflag, `BUILD_INFO.expected_migration_timestamp`, and newest postgres migration prefix agree |
+| `/usr/local/lib/qops/e2b-assert-dist-pair.sh` | Fail unless `bin/api` ldflag, `BUILD_INFO.expected_migration_timestamp`, newest postgres migration prefix, and the required patch agree |
 | `/usr/local/lib/qops/e2b-extract-api-migration-timestamp.sh` | Shared 14-digit `expectedMigrationTimestamp` extractor (`strings` on `bin/api`; fail closed on zero or multiple matches) |
+| `/usr/local/lib/qops/e2b-verify-build-patches.py` | Verify the required patch filename and SHA-256 in `BUILD_INFO` |
 | `/usr/local/lib/qops/e2b-compare-upgrade-pins.py` | Template rebuild iff `envd_version` / `firecracker_version` / `kernel_version` changed |
 | `/usr/local/lib/qops/e2b-set-force-stop.sh` | Write `FORCE_STOP=true\|false` in `orchestrator.env` and manage `/orchestrator/force-stop` |
 | `/usr/local/lib/qops/e2b-extract-build-info.sh` | Extract `BUILD_INFO` from a dist tarball |

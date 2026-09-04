@@ -61,6 +61,10 @@ e2b_services_orchestrator_base_path: "{{ e2b_host_orchestrator_root | default('/
 # Patched orchestrator consults this marker at SIGTERM (FORCE_STOP env is
 # parsed once at process start). upgrade.yml creates it before systemctl stop.
 e2b_services_force_stop_marker: "{{ e2b_services_orchestrator_base_path }}/force-stop"
+e2b_services_force_stop_patch_filename: "{{ e2b_force_stop_patch_filename | default('0001-force-stop-marker.patch') }}"
+e2b_services_force_stop_patch_sha256: >-
+  {{ e2b_force_stop_patch_sha256
+     | default('ee6e4144cd1ae5a5ff6219a2c68fe90a3e893bb28a06cc8dd9bc30004e2789fa') }}
 e2b_services_template_storage_path: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}/storage"
 e2b_services_build_cache_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}/build"
 e2b_services_host_envd_path: "{{ e2b_services_envd_dest }}"

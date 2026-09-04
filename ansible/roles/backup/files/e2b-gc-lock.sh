@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hold SHARE ROW EXCLUSIVE on env_builds / env_build_assignments / snapshots
+# Hold SHARE ROW EXCLUSIVE on all tables used by the live-build query
 # until stdin EOF, then COMMIT. qops-e2b-gc runs query+delete while this
 # session is open so INSERT (ROW EXCLUSIVE) waits.
 #
@@ -16,7 +16,7 @@ import time
 
 LOCK_SQL = (
     "BEGIN;\n"
-    "LOCK TABLE env_builds, env_build_assignments, snapshots "
+    "LOCK TABLE env_builds, env_build_assignments, snapshots, snapshot_templates "
     "IN SHARE ROW EXCLUSIVE MODE;\n"
     "SELECT '__QOPS_E2B_GC_LOCK_OK__';\n"
 )

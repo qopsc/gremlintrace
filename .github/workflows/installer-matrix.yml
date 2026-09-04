@@ -39,11 +39,12 @@ jobs:
         env:
           QOPS_CI_LLM_API_KEY: ${{ secrets.QOPS_CI_LLM_API_KEY }}
           QOPS_CI_CANARY_REPO_TOKEN: ${{ secrets.QOPS_CI_CANARY_REPO_TOKEN }}
+          QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD: ${{ secrets.QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD }}
         run: ./ci/matrix/gate-secrets.sh
 
   skip-report:
     needs: gate
-    if: needs.gate.outputs.run_install != 'true'
+    if: ${{ !cancelled() && needs.gate.outputs.run_install != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Report skipped matrix leg
@@ -55,19 +56,21 @@ jobs:
             echo
             echo "${SKIP_REASON}"
             echo
-            echo "Configure repository secrets \`QOPS_CI_LLM_API_KEY\` and"
-            echo "\`QOPS_CI_CANARY_REPO_TOKEN\` on the default branch to enable the"
+            echo "Configure repository secrets \`QOPS_CI_LLM_API_KEY\`,"
+            echo "\`QOPS_CI_CANARY_REPO_TOKEN\`, and"
+            echo "\`QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD\` on the default branch to enable the"
             echo "ubuntu-24.04 leg. Fork pull requests never receive secrets."
           } >>"${GITHUB_STEP_SUMMARY}"
 
   ubuntu-2404:
     needs: gate
-    if: needs.gate.outputs.run_install == 'true'
+    if: ${{ !cancelled() && needs.gate.outputs.run_install == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
       QOPS_CI_LLM_API_KEY: ${{ secrets.QOPS_CI_LLM_API_KEY }}
       QOPS_CI_CANARY_REPO_TOKEN: ${{ secrets.QOPS_CI_CANARY_REPO_TOKEN }}
+      QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD: ${{ secrets.QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD }}
       QOPS_CI_CANARY_REPO: ${{ vars.QOPS_CI_CANARY_REPO }}
     steps:
       # actions/checkout v4.2.2
@@ -105,7 +108,7 @@ jobs:
         run: ./ci/matrix/run-bootstrap.sh --playbook site
 
       - name: Report — site.yml install
-        if: always() && steps.install.outcome != 'skipped'
+        if: ${{ always() && steps.install.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.install.outcome }}
         run: |
@@ -116,26 +119,26 @@ jobs:
 
       - name: Check — doctor.yml
         id: doctor
-        if: steps.install.outcome == 'success'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: ./ci/matrix/run-bootstrap.sh --playbook doctor
 
       - name: Report — doctor.yml
-        if: always() && steps.doctor.outcome != 'skipped'
+        if: ${{ always() && steps.doctor.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.doctor.outcome }}
         run: |
           status=fail
           if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
           ./ci/matrix/step-summary.sh "doctor.yml" "${status}" \
-            "qops-doctor: preflight, units, E2B smoke, isolation probe. Webhook external probe skipped on CI."
+            "qops-doctor: preflight, units, E2B smoke, isolation probe, and the configured external webhook probe."
 
       - name: Check — Kodus smoke (synthetic webhook)
         id: kodus_smoke
-        if: steps.doctor.outcome == 'success'
+        if: ${{ !cancelled() && steps.doctor.outcome == 'success' }}
         run: ./ci/matrix/kodus-smoke.sh
 
       - name: Report — Kodus smoke
-        if: always() && steps.kodus_smoke.outcome != 'skipped'
+        if: ${{ always() && steps.kodus_smoke.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.kodus_smoke.outcome }}
         run: |
@@ -146,11 +149,11 @@ jobs:
 
       - name: Check — second site.yml idempotency
         id: idempotency
-        if: steps.install.outcome == 'success'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: ./ci/matrix/check-idempotency.sh
 
       - name: Report — idempotency
-        if: always() && steps.idempotency.outcome != 'skipped'
+        if: ${{ always() && steps.idempotency.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.idempotency.outcome }}
         run: |
@@ -161,11 +164,11 @@ jobs:
 
       - name: Check — mismatched API/DB pair fails fast
         id: dist_pair
-        if: steps.install.outcome == 'success'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: ./ci/matrix/check-dist-pair-mismatch.sh
 
       - name: Report — API/DB pair guard
-        if: always() && steps.dist_pair.outcome != 'skipped'
+        if: ${{ always() && steps.dist_pair.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.dist_pair.outcome }}
         run: |
@@ -176,11 +179,11 @@ jobs:
 
       - name: Check — orchestrator restart leak reclaim
         id: orch_restart
-        if: steps.doctor.outcome == 'success'
+        if: ${{ !cancelled() && steps.doctor.outcome == 'success' }}
         run: ./ci/matrix/check-orchestrator-restart.sh
 
       - name: Report — orchestrator restart
-        if: always() && steps.orch_restart.outcome != 'skipped'
+        if: ${{ always() && steps.orch_restart.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.orch_restart.outcome }}
         run: |
@@ -191,11 +194,11 @@ jobs:
 
       - name: Check — upgrade.yml
         id: upgrade
-        if: steps.install.outcome == 'success'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: ./ci/matrix/check-upgrade.sh
 
       - name: Report — upgrade.yml
-        if: always() && steps.upgrade.outcome != 'skipped'
+        if: ${{ always() && steps.upgrade.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.upgrade.outcome }}
         run: |

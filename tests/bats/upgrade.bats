@@ -92,7 +92,15 @@ PY
   [[ "$output" == *"changed"* ]]
   grep -qx 'FORCE_STOP=true' "${envf}"
   [ -f "${marker}" ]
-  [ "$(stat -c '%a' "${marker}")" = "600" ]
+  marker_mode="$(python3 - "${marker}" <<'PY'
+import os
+import stat
+import sys
+
+print(format(stat.S_IMODE(os.stat(sys.argv[1]).st_mode), "o"))
+PY
+)"
+  [ "${marker_mode}" = "600" ]
   [ ! -s "${marker}" ]
   run bash "${FORCE}" "${envf}" true
   [ "$status" -eq 0 ]
@@ -173,6 +181,45 @@ PY
   run bash "${ASSERT}" --dir "${stage}"
   [ "$status" -ne 0 ]
   [[ "$output" == *"mismatch"* ]]
+}
+
+@test "dist patch metadata is required before an upgrade stop" {
+  archive="${BATS_TMPDIR}/e2b-patch-check.tar.gz"
+  bash "${FIXTURE}" "${archive}" 6e4ce14
+  run bash "${ASSERT}" --archive "${archive}" \
+    --required-patch 0001-force-stop-marker.patch \
+    --required-patch-sha256 ee6e4144cd1ae5a5ff6219a2c68fe90a3e893bb28a06cc8dd9bc30004e2789fa
+  [ "$status" -eq 0 ]
+
+  run bash "${ASSERT}" --archive "${archive}" \
+    --required-patch 0001-force-stop-marker.patch \
+    --required-patch-sha256 0000000000000000000000000000000000000000000000000000000000000000
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sha256"* ]]
+}
+
+@test "upgrade requires the installed dist to contain the force-stop patch" {
+  run python3 - "${UPGRADE}" <<'PY'
+import sys
+import yaml
+
+play = yaml.safe_load(open(sys.argv[1]))[0]
+tasks = play["tasks"]
+names = [task.get("name", "") for task in tasks]
+installed_idx = next(i for i, name in enumerate(names) if name.startswith("Require the installed E2B dist"))
+force_idx = next(i for i, name in enumerate(names) if "FORCE_STOP" in name)
+assert installed_idx < force_idx, (installed_idx, force_idx, names)
+check = tasks[installed_idx]
+argv = check["ansible.builtin.command"]["argv"]
+assert argv[0:2] == ["python3", "/usr/local/lib/qops/e2b-verify-build-patches.py"]
+assert argv[-2:] == [
+    "{{ e2b_services_force_stop_patch_filename }}",
+    "{{ e2b_services_force_stop_patch_sha256 }}",
+]
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }
 
 @test "swapped API binary with matching BUILD_INFO and migrations fails" {

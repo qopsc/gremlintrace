@@ -36,8 +36,8 @@ setup() {
   run env \
     QOPS_UNINSTALL_LOG="${log}" \
     QOPS_UNINSTALL_CLEANUP="${CLEANUP}" \
-    QOPS_UNINSTALL_SYSTEMCTL="/bin/true" \
-    QOPS_UNINSTALL_DOCKER="/bin/true" \
+    QOPS_UNINSTALL_SYSTEMCTL="$(command -v true)" \
+    QOPS_UNINSTALL_DOCKER="$(command -v true)" \
     QOPS_UNINSTALL_DATA_PATHS="${data}" \
     QOPS_UNINSTALL_SOFTWARE_PATHS="${software}" \
     QOPS_UNINSTALL_NFT="$(command -v true)" \
@@ -59,8 +59,8 @@ setup() {
   run env \
     QOPS_UNINSTALL_LOG="${root}/log" \
     QOPS_UNINSTALL_CLEANUP="${CLEANUP}" \
-    QOPS_UNINSTALL_SYSTEMCTL="/bin/true" \
-    QOPS_UNINSTALL_DOCKER="/bin/true" \
+    QOPS_UNINSTALL_SYSTEMCTL="$(command -v true)" \
+    QOPS_UNINSTALL_DOCKER="$(command -v true)" \
     QOPS_UNINSTALL_DATA_PATHS="${data}" \
     QOPS_UNINSTALL_SOFTWARE_PATHS="${root}/software-missing" \
     QOPS_UNINSTALL_NFT="$(command -v true)" \
@@ -96,14 +96,14 @@ EOF
   run env \
     QOPS_UNINSTALL_NFT="${root}/nft" \
     QOPS_UNINSTALL_IP="${root}/ip" \
-    QOPS_UNINSTALL_NFT_TABLE="qops_filter" \
+    QOPS_UNINSTALL_E2B_NFT_TABLES="v2-host-firewall" \
     QOPS_UNINSTALL_NETNS_DIR="${netns}" \
     QOPS_UNINSTALL_SYS_CLASS_NET="${veth}" \
     QOPS_UNINSTALL_CGROUP="${cgroup}" \
     QOPS_UNINSTALL_LOG="${root}/cleanup.log" \
     bash "${CLEANUP}"
   [ "$status" -eq 0 ]
-  grep -q 'delete table inet qops_filter' "${nft_log}"
+  grep -q 'delete table inet v2-host-firewall' "${nft_log}"
   grep -q 'netns delete ns-deadbeef' "${ip_log}"
   grep -q 'link delete veth-abc' "${ip_log}"
   grep -q "attempt cgroup cleanup ${cgroup}" "${root}/cleanup.log"
@@ -112,7 +112,11 @@ EOF
 
 @test "uninstall.yml wires nftables table, netns, veth, and cgroup cleanup" {
   grep -q 'e2b-cleanup-runtime.sh' "${UNINSTALL_PB}"
-  grep -q 'qops_filter' "${UNINSTALL_PB}"
+  grep -q 'v2-host-firewall' "${UNINSTALL_PB}"
+  if grep -q 'qops_filter' "${UNINSTALL_PB}"; then
+    echo "uninstall must not delete the host qops_filter policy table" >&2
+    return 1
+  fi
   grep -q 'qops-uninstall' "${UNINSTALL_PB}"
   grep -q 'ns-\*' "${CLEANUP}"
   grep -q 'veth-\*' "${CLEANUP}"
@@ -146,7 +150,7 @@ EOF
     QOPS_UNINSTALL_LOG="${log}" \
     QOPS_UNINSTALL_CLEANUP="${cleanup_wrap}" \
     QOPS_UNINSTALL_SYSTEMCTL="${sys}" \
-    QOPS_UNINSTALL_DOCKER="/bin/true" \
+    QOPS_UNINSTALL_DOCKER="$(command -v true)" \
     QOPS_UNINSTALL_DATA_PATHS="${root}/data" \
     QOPS_UNINSTALL_SOFTWARE_PATHS="${root}/software-missing" \
     QOPS_UNINSTALL_NFT="$(command -v true)" \
@@ -194,7 +198,7 @@ EOF
     QOPS_UNINSTALL_LOG="${root}/log" \
     QOPS_UNINSTALL_CLEANUP="${CLEANUP}" \
     QOPS_UNINSTALL_SYSTEMCTL="${sys}" \
-    QOPS_UNINSTALL_DOCKER="/bin/true" \
+    QOPS_UNINSTALL_DOCKER="$(command -v true)" \
     QOPS_UNINSTALL_DATA_PATHS="${data}" \
     QOPS_UNINSTALL_SOFTWARE_PATHS="${root}/software-missing" \
     QOPS_UNINSTALL_NFT="$(command -v true)" \

@@ -3,8 +3,24 @@
 setup() {
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   VERIFY="${REPO_ROOT}/ansible/roles/backup/files/qops-backup-verify"
+  BACKUP="${REPO_ROOT}/ansible/roles/backup/files/qops-backup"
   UPGRADE="${REPO_ROOT}/ansible/playbooks/upgrade.yml"
   RENDER="${REPO_ROOT}/tests/fixtures/render-template.sh"
+}
+
+@test "qops-backup keeps Mongo credentials out of argv and cleans container temp files" {
+  if grep -Eq -- '-p[[:space:]]+"${MG_PASS}"' "${BACKUP}"; then
+    echo "Mongo password must not be passed as a command-line argument" >&2
+    return 1
+  fi
+  grep -q 'mongodump --config' "${BACKUP}"
+  grep -q 'config_file=.*mktemp' "${BACKUP}"
+  grep -q 'rabbitmqctl export_definitions' "${BACKUP}"
+  grep -q 'definitions_file=.*mktemp' "${BACKUP}"
+  if grep -q '/tmp/qops-rabbitmq-definitions' "${BACKUP}"; then
+    echo "RabbitMQ definitions must not remain at a fixed container path" >&2
+    return 1
+  fi
 }
 
 make_bundle() {

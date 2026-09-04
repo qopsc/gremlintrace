@@ -37,7 +37,10 @@ json.dump(
         "expected_migration_timestamp": "20240101000000",
         "built_at_utc": "2026-08-31T00:00:00Z",
         "clean_nfs_cache": True,
-        "patches": [],
+        "patches": [{
+            "filename": "0001-force-stop-marker.patch",
+            "sha256": "ee6e4144cd1ae5a5ff6219a2c68fe90a3e893bb28a06cc8dd9bc30004e2789fa",
+        }],
     },
     open(path, "w", encoding="utf-8"),
     indent=2,

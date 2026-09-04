@@ -6,6 +6,8 @@ VERSION_DIR="${1:?version install dir required}"
 CURRENT_LINK="${2:?current symlink path required}"
 ENVD_DEST="${3:?envd destination path required}"
 EXPECTED_VERSION="${4:?expected e2b_dist_version required}"
+EXPECTED_PATCH_NAME="${5:-}"
+EXPECTED_PATCH_SHA256="${6:-}"
 
 if [[ ! -d "${VERSION_DIR}" ]]; then
   exit 1
@@ -34,6 +36,19 @@ if [[ -f "${VERSION_DIR}/BUILD_INFO" ]]; then
     echo "BUILD_INFO e2b_dist_version ${observed} != ${EXPECTED_VERSION}" >&2
     exit 1
   fi
+fi
+
+if [[ -n "${EXPECTED_PATCH_NAME}" ]]; then
+  [[ -n "${EXPECTED_PATCH_SHA256}" ]] || {
+    echo "expected patch checksum is required when a patch is required" >&2
+    exit 1
+  }
+  PATCH_CHECKER="/usr/local/lib/qops/e2b-verify-build-patches.py"
+  if [[ ! -f "${PATCH_CHECKER}" ]]; then
+    PATCH_CHECKER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/e2b-verify-build-patches.py"
+  fi
+  python3 "${PATCH_CHECKER}" \
+    "${VERSION_DIR}/BUILD_INFO" "${EXPECTED_PATCH_NAME}" "${EXPECTED_PATCH_SHA256}"
 fi
 
 if [[ ! -f "${ENVD_DEST}" ]]; then

@@ -163,8 +163,9 @@ Faithful CI reproduction of local developer checks:
 
 Job `gate` runs `ci/matrix/gate-secrets.sh`:
 
-- **Skips** (success with summary, no install) when `QOPS_CI_LLM_API_KEY` or
-  `QOPS_CI_CANARY_REPO_TOKEN` is missing.
+- **Skips** (success with summary, no install) when `QOPS_CI_LLM_API_KEY`,
+  `QOPS_CI_CANARY_REPO_TOKEN`, or `QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD` is
+  missing.
 - **Skips** fork pull requests (`GITHUB_HEAD_REPOSITORY != GITHUB_REPOSITORY`) so untrusted
   PR code never receives secrets. Does **not** use `pull_request_target`.
 
@@ -204,8 +205,9 @@ comments, or 700 s streamed `commands.run`.
 
 | Job | `permissions` | Secrets |
 |---|---|---|
-| `gate`, `skip-report` | `contents: read` | none |
-| `ubuntu-2404` | `contents: read` | `QOPS_CI_LLM_API_KEY`, `QOPS_CI_CANARY_REPO_TOKEN` |
+| `gate` | `contents: read` | `QOPS_CI_LLM_API_KEY`, `QOPS_CI_CANARY_REPO_TOKEN`, `QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD` |
+| `skip-report` | `contents: read` | none |
+| `ubuntu-2404` | `contents: read` | `QOPS_CI_LLM_API_KEY`, `QOPS_CI_CANARY_REPO_TOKEN`, `QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD` |
 
 ### Not covered on GitHub-hosted runners
 

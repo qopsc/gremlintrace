@@ -55,7 +55,7 @@
           - "{{ backup_uninstall_script_path | default('/usr/local/bin/qops-uninstall') }}"
           - --confirm
       environment:
-        QOPS_UNINSTALL_NFT_TABLE: "{{ host_firewall_nftables_table_name | default('qops_filter') }}"
+        QOPS_UNINSTALL_E2B_NFT_TABLES: "{{ e2b_services_nft_tables | default('v2-host-firewall') }}"
         QOPS_UNINSTALL_CLEANUP: /usr/local/lib/qops/e2b-cleanup-runtime.sh
       register: qops_uninstall_run
       changed_when: "'uninstall complete' in qops_uninstall_run.stdout"
@@ -70,7 +70,7 @@
           - --confirm
           - --destroy-data
       environment:
-        QOPS_UNINSTALL_NFT_TABLE: "{{ host_firewall_nftables_table_name | default('qops_filter') }}"
+        QOPS_UNINSTALL_E2B_NFT_TABLES: "{{ e2b_services_nft_tables | default('v2-host-firewall') }}"
         QOPS_UNINSTALL_CLEANUP: /usr/local/lib/qops/e2b-cleanup-runtime.sh
       register: qops_uninstall_run_destroy
       changed_when: "'uninstall complete' in qops_uninstall_run_destroy.stdout"

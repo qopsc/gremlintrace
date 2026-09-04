@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Remove E2B leftover runtime state: nftables table, netns ns-*, veth-*, cgroup.
+# Remove E2B leftover runtime state: E2B nftables table, netns ns-*, veth-*, cgroup.
 # Best-effort: every class of cleanup is attempted; individual misses are logged.
 set -u
 
 NFT_BIN="${QOPS_UNINSTALL_NFT:-nft}"
 IP_BIN="${QOPS_UNINSTALL_IP:-ip}"
-TABLE="${QOPS_UNINSTALL_NFT_TABLE:-qops_filter}"
+TABLES_RAW="${QOPS_UNINSTALL_E2B_NFT_TABLES:-v2-host-firewall}"
 NETNS_DIR="${QOPS_UNINSTALL_NETNS_DIR:-/run/netns}"
 SYS_CLASS_NET="${QOPS_UNINSTALL_SYS_CLASS_NET:-/sys/class/net}"
 CGROUP_ROOT="${QOPS_UNINSTALL_CGROUP:-/sys/fs/cgroup/e2b}"
@@ -19,11 +19,18 @@ log() {
   fi
 }
 
-attempted=$((attempted + 1))
-log "attempt nft delete table inet ${TABLE}"
-if ! "${NFT_BIN}" delete table inet "${TABLE}" 2>/dev/null; then
-  log "nft table inet ${TABLE} absent or delete failed"
-fi
+IFS=',' read -r -a NFT_TABLES <<<"${TABLES_RAW}"
+for table in "${NFT_TABLES[@]}"; do
+  if [[ ! "${table}" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    log "skip invalid E2B nft table name: ${table}"
+    continue
+  fi
+  attempted=$((attempted + 1))
+  log "attempt nft delete table inet ${table}"
+  if ! "${NFT_BIN}" delete table inet "${table}" 2>/dev/null; then
+    log "nft table inet ${table} absent or delete failed"
+  fi
+done
 
 if [[ -d "${NETNS_DIR}" ]]; then
   shopt -s nullglob

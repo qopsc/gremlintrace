@@ -5,36 +5,12 @@
   become: true
   vars_files:
     - ../../versions.yml
-  pre_tasks:
-    - name: Load documented defaults without overriding inventory
-      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
-    - name: Verify operator and pin variables resolve from vars_files
-      ansible.builtin.assert:
-        that:
-          - kodus_image_tag is defined
-          - kodus_image_tag | length > 0
-          - kodus_image_tag != "latest"
-          - e2b_dist_version is defined
-          - firecracker_version is defined
-          - kernel_version is defined
-          - envd_version is defined
-        fail_msg: >-
-          vars_files did not load versions.yml (kodus_image_tag must be pinned,
-          never latest)
-      tags:
-        - always
-
-    - name: Fail when E2B storage backend is not local
-      ansible.builtin.fail:
-        msg: >-
-          e2b_storage_backend={{ e2b_storage_backend }} is not supported in M1.
-      when: e2b_storage_backend != "local"
-      tags:
-        - always
   vars:
     e2b_services_seed_enabled: false
     e2b_upgrade_new_build_info: /var/cache/qops/upgrade-BUILD_INFO
   pre_tasks:
+    - name: Load documented defaults without overriding inventory
+      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
     - name: Verify operator and pin variables resolve from vars_files
       ansible.builtin.assert:
         that:
@@ -99,6 +75,8 @@
         cmd: >-
           /usr/local/lib/qops/e2b-assert-dist-pair.sh
           --archive {{ e2b_services_dist_archive_path }}
+          --required-patch {{ e2b_services_force_stop_patch_filename }}
+          --required-patch-sha256 {{ e2b_services_force_stop_patch_sha256 }}
       changed_when: false
       tags:
         - upgrade
@@ -116,6 +94,18 @@
           No installed E2B dist at {{ e2b_services_current_dir }}/BUILD_INFO.
           Run site.yml before upgrade.yml.
       when: not e2b_upgrade_installed_build_info.stat.exists
+      tags:
+        - upgrade
+
+    - name: Require the installed E2B dist to contain the force-stop patch
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /usr/local/lib/qops/e2b-verify-build-patches.py
+          - "{{ e2b_services_current_dir }}/BUILD_INFO"
+          - "{{ e2b_services_force_stop_patch_filename }}"
+          - "{{ e2b_services_force_stop_patch_sha256 }}"
+      changed_when: false
       tags:
         - upgrade
 

@@ -17,6 +17,8 @@ if [[ -z "${skip_reason}" ]]; then
     skip_reason="QOPS_CI_LLM_API_KEY is not configured; installer matrix skipped."
   elif [[ -z "${QOPS_CI_CANARY_REPO_TOKEN:-}" ]]; then
     skip_reason="QOPS_CI_CANARY_REPO_TOKEN is not configured; installer matrix skipped."
+  elif [[ -z "${QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD:-}" ]]; then
+    skip_reason="QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD is not configured; installer matrix skipped."
   fi
 fi
 

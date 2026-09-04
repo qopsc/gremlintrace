@@ -19,6 +19,7 @@ if [[ ! -f "${DIST_SRC}" ]]; then
   exit 1
 fi
 cp -f "${DIST_SRC}" "${DIST_OUT}"
+(cd "${STAGE_DIR}" && sha256sum "$(basename "${DIST_OUT}")") >"${DIST_OUT}.sha256"
 
 ARTIFACTS_DIR="${STAGE_DIR}/fc-artifacts-src"
 rm -rf "${ARTIFACTS_DIR}"

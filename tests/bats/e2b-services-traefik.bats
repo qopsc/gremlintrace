@@ -555,13 +555,15 @@ PY
   envd="${BATS_TMPDIR}/fc-envd/envd"
   install="${REPO_ROOT}/ansible/roles/e2b_services/files/install-e2b-dist.sh"
   verify="${REPO_ROOT}/ansible/roles/e2b_services/files/verify-e2b-dist.sh"
-  run bash "${install}" "${archive}" "${dest}" "${current}" "${envd}" "${dist_version}"
+  patch_name="0001-force-stop-marker.patch"
+  patch_sha="ee6e4144cd1ae5a5ff6219a2c68fe90a3e893bb28a06cc8dd9bc30004e2789fa"
+  run bash "${install}" "${archive}" "${dest}" "${current}" "${envd}" "${dist_version}" "${patch_name}" "${patch_sha}"
   [ "$status" -eq 0 ]
-  run bash "${verify}" "${dest}" "${current}" "${envd}" "${dist_version}"
+  run bash "${verify}" "${dest}" "${current}" "${envd}" "${dist_version}" "${patch_name}" "${patch_sha}"
   [ "$status" -eq 0 ]
   [[ "$output" == *verified ]]
   printf 'corrupted\n' >>"${dest}/bin/api"
-  run bash "${verify}" "${dest}" "${current}" "${envd}" "${dist_version}"
+  run bash "${verify}" "${dest}" "${current}" "${envd}" "${dist_version}" "${patch_name}" "${patch_sha}"
   [ "$status" -ne 0 ]
 }
 
@@ -581,7 +583,7 @@ PY
     "$(dirname "${archive}")" "$(basename "${sidecar}")"
   [ "$status" -ne 0 ]
   grep -Fq 'e2b_services_dist_effective_checksum_url' \
-    "${REPO_ROOT}/ansible/roles/e2b_services/tasks/main.yml"
+    "${REPO_ROOT}/ansible/roles/e2b_services/tasks/fetch-dist.yml"
 }
 
 @test "goose migration wrapper keeps the connection string out of argv" {

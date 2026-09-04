@@ -89,6 +89,10 @@ tar -xzf "${TARBALL}" -C "${WORK}"
 
 [[ -f "${WORK}/BUILD_INFO" ]] || die "BUILD_INFO missing"
 
+expected_patch_name="$(yaml_get e2b_force_stop_patch_filename)"
+expected_patch_sha256="$(yaml_get e2b_force_stop_patch_sha256)"
+python3 "${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-verify-build-patches.py" "${WORK}/BUILD_INFO" "${expected_patch_name}" "${expected_patch_sha256}" || die "BUILD_INFO does not contain the required force-stop patch"
+
 for bin in orchestrator api client-proxy envd e2b-seed goose; do
   [[ -x "${WORK}/bin/${bin}" ]] || die "missing or non-executable: bin/${bin}"
 done

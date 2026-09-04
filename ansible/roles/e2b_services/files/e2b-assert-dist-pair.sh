@@ -4,12 +4,14 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: e2b-assert-dist-pair.sh --dir DIR | --archive TAR.GZ" >&2
+  echo "usage: e2b-assert-dist-pair.sh (--dir DIR | --archive TAR.GZ) [--required-patch NAME --required-patch-sha256 SHA256]" >&2
   exit 2
 }
 
 DIR=""
 ARCHIVE=""
+REQUIRED_PATCH_NAME=""
+REQUIRED_PATCH_SHA256=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --dir)
@@ -18,6 +20,14 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --archive)
       ARCHIVE="${2:?}"
+      shift 2
+      ;;
+    --required-patch)
+      REQUIRED_PATCH_NAME="${2:?}"
+      shift 2
+      ;;
+    --required-patch-sha256)
+      REQUIRED_PATCH_SHA256="${2:?}"
       shift 2
       ;;
     -h|--help)
@@ -68,6 +78,16 @@ fi
 if [[ ! -d "${MIGRATIONS}" ]]; then
   echo "postgres migrations missing at ${MIGRATIONS}" >&2
   exit 1
+fi
+
+if [[ -n "${REQUIRED_PATCH_NAME}" ]]; then
+  [[ -n "${REQUIRED_PATCH_SHA256}" ]] || {
+    echo "required patch checksum is missing" >&2
+    exit 1
+  }
+  HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  python3 "${HERE}/e2b-verify-build-patches.py" \
+    "${BUILD_INFO}" "${REQUIRED_PATCH_NAME}" "${REQUIRED_PATCH_SHA256}"
 fi
 
 if [[ -f "${DIR}/SHA256SUMS" ]]; then

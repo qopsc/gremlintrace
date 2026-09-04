@@ -31,6 +31,7 @@
     - e2b-assert-dist-pair.sh
     - e2b-extract-api-migration-timestamp.sh
     - e2b-compare-upgrade-pins.py
+    - e2b-verify-build-patches.py
     - e2b-set-force-stop.sh
     - e2b-extract-build-info.sh
     - e2b-cleanup-runtime.sh
@@ -78,6 +79,32 @@
   tags:
     - e2b_services
 
+- name: Resolve E2B dist checksum path and URL
+  ansible.builtin.set_fact:
+    e2b_services_dist_effective_checksum_path: >-
+      {{ e2b_services_dist_checksum_path if (e2b_services_dist_checksum_path | length > 0)
+         else (e2b_services_dist_archive_path ~ '.sha256') }}
+    e2b_services_dist_effective_checksum_url: >-
+      {{ e2b_services_dist_checksum_url if (e2b_services_dist_checksum_url | length > 0)
+         else (e2b_services_dist_effective_url ~ '.sha256'
+               if e2b_services_dist_effective_url | length > 0 else '') }}
+  tags:
+    - e2b_services
+
+- name: Download E2B dist checksum
+  ansible.builtin.get_url:
+    url: "{{ e2b_services_dist_effective_checksum_url }}"
+    dest: "{{ e2b_services_dist_effective_checksum_path }}"
+    mode: "0644"
+    force: true
+  register: e2b_services_dist_checksum_download
+  failed_when: false
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - e2b_services_dist_effective_checksum_url | length > 0
+  tags:
+    - e2b_services
+
 - name: Assert E2B dist archive is available
   ansible.builtin.stat:
     path: "{{ e2b_services_dist_archive_path }}"
@@ -93,5 +120,59 @@
       qops_release_base_url, or qops_github_repository
       (https://github.com/<slug>/releases/download/e2b-<e2b_dist_version>/e2b-<e2b_dist_version>.tar.gz).
   when: not e2b_services_dist_archive_stat.stat.exists
+  tags:
+    - e2b_services
+
+- name: Check whether E2B dist checksum is available
+  ansible.builtin.stat:
+    path: "{{ e2b_services_dist_effective_checksum_path }}"
+  register: e2b_services_dist_checksum_stat
+  tags:
+    - e2b_services
+
+- name: Fail when E2B dist checksum is missing
+  ansible.builtin.fail:
+    msg: >-
+      E2B dist checksum not found at {{ e2b_services_dist_effective_checksum_path }}.
+      The release or local artifact staging must provide the adjacent
+      e2b-{{ e2b_dist_version }}.tar.gz.sha256 sidecar.
+  when: not e2b_services_dist_checksum_stat.stat.exists
+  tags:
+    - e2b_services
+
+- name: Verify cached E2B dist archive against its external checksum
+  ansible.builtin.command:
+    argv:
+      - sha256sum
+      - --check
+      - "{{ e2b_services_dist_effective_checksum_path | basename }}"
+    chdir: "{{ e2b_services_dist_effective_checksum_path | dirname }}"
+  register: e2b_services_dist_archive_checksum
+  changed_when: false
+  failed_when: false
+  tags:
+    - e2b_services
+
+- name: Re-download E2B dist archive when its checksum is stale
+  ansible.builtin.get_url:
+    url: "{{ e2b_services_dist_effective_url }}"
+    dest: "{{ e2b_services_dist_archive_path }}"
+    mode: "0644"
+    force: true
+  when:
+    - e2b_services_dist_local_path | length == 0
+    - e2b_services_dist_effective_url | length > 0
+    - e2b_services_dist_archive_checksum.rc != 0
+  tags:
+    - e2b_services
+
+- name: Verify E2B dist archive checksum
+  ansible.builtin.command:
+    argv:
+      - sha256sum
+      - --check
+      - "{{ e2b_services_dist_effective_checksum_path | basename }}"
+    chdir: "{{ e2b_services_dist_effective_checksum_path | dirname }}"
+  changed_when: false
   tags:
     - e2b_services

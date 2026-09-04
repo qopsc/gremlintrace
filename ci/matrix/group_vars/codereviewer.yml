@@ -23,5 +23,6 @@ e2b_host_fc_artifacts_local_path: /var/cache/qops/ci/e2b-fc-artifacts.tar.gz
 
 # LLM key is injected via ci/matrix/run-bootstrap.sh from QOPS_CI_LLM_API_KEY (never committed).
 
-# Webhook external probe is not available on the runner itself.
-doctor_webhook_external_probe_cmd: ""
+# doctor_webhook_external_probe_cmd is injected by run-bootstrap.sh from the
+# trusted repository secret QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD. It must execute
+# from a host outside this runner and probe the configured webhook URL.

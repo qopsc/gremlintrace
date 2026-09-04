@@ -2,6 +2,8 @@
 # M1 backup: both Postgres instances, mongodump, RabbitMQ definitions, /etc/qops.
 # Does not back up the template store, S3/NFS, or ClickHouse (M2).
 set -euo pipefail
+# The single-quoted shell snippets below are intentionally evaluated in the
+# container by docker compose, not by this host shell.
 
 ROOT="${QOPS_BACKUP_ROOT:-/var/backups/qops}"
 RETENTION_DAYS="${QOPS_BACKUP_RETENTION_DAYS:-7}"
@@ -83,27 +85,44 @@ compose_e2b exec -T postgres \
   pg_dump -U "${E2B_PG_USER}" --format=plain --no-owner --no-acl "${E2B_PG_DB}" \
   | gzip -c >"${DEST}/e2b-postgres.sql.gz"
 
-compose_kodus exec -T db_kodus_mongodb \
-  mongodump --archive --gzip \
-  -u "${MG_USER}" -p "${MG_PASS}" --authenticationDatabase admin \
-  --db "${MG_DB}" >"${DEST}/mongo.archive.gz"
+MONGO_CONFIG="$({
+  MONGO_USER="${MG_USER}" MONGO_PASSWORD="${MG_PASS}" MONGO_DATABASE="${MG_DB}" \
+    python3 - <<'PY'
+import json
+import os
 
-tmp_defs="$(mktemp)"
-chmod 0600 "${tmp_defs}"
-compose_kodus exec -T rabbitmq \
-  rabbitmqctl export_definitions /tmp/qops-rabbitmq-definitions.json >/dev/null
-compose_kodus exec -T rabbitmq \
-  cat /tmp/qops-rabbitmq-definitions.json >"${tmp_defs}"
-python3 - "${tmp_defs}" "${DEST}/rabbitmq-definitions.json" <<'PY'
+print(json.dumps({
+    "username": os.environ["MONGO_USER"],
+    "password": os.environ["MONGO_PASSWORD"],
+    "authenticationDatabase": "admin",
+    "db": os.environ["MONGO_DATABASE"],
+}))
+PY
+})"
+# shellcheck disable=SC2016
+printf '%s\n' "${MONGO_CONFIG}" |
+  compose_kodus exec -T db_kodus_mongodb sh -eu -c '
+    config_file="$(mktemp)"
+    trap '\''rm -f "${config_file}"'\'' EXIT
+    cat >"${config_file}"
+    mongodump --config "${config_file}" --archive --gzip
+  ' >"${DEST}/mongo.archive.gz"
+
+# shellcheck disable=SC2016
+compose_kodus exec -T rabbitmq sh -eu -c '
+  definitions_file="$(mktemp)"
+  trap '\''rm -f "${definitions_file}"'\'' EXIT
+  rabbitmqctl export_definitions "${definitions_file}" >/dev/null
+  cat "${definitions_file}"
+' >"${DEST}/rabbitmq-definitions.json"
+python3 - "${DEST}/rabbitmq-definitions.json" <<'PY'
 import json
 import pathlib
 import sys
 
-src, dest = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-json.loads(src.read_text(encoding="utf-8"))
-dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+path = pathlib.Path(sys.argv[1])
+json.loads(path.read_text(encoding="utf-8"))
 PY
-rm -f "${tmp_defs}"
 
 tar -C "$(dirname "${QOPS_DIR}")" -czf "${DEST}/etc-qops.tar.gz" "$(basename "${QOPS_DIR}")"
 

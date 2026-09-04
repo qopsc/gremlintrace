@@ -25,6 +25,7 @@ EXTRA=(
   -e "qops_lan_ipv4=${QOPS_CI_LAN_IPV4}"
   -e "tls_cert_path=/etc/qops/ci-tls/tls.crt"
   -e "tls_key_path=/etc/qops/ci-tls/tls.key"
+  -e "doctor_webhook_external_probe_cmd=${QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD}"
 )
 
 if [[ -n "${QOPS_CI_LLM_API_KEY:-}" ]]; then
