@@ -84,7 +84,8 @@ qops_lan_ipv4: ""
 
 # Command that probes kodus-webhooks from a host that is not this machine.
 # Required for a passing doctor run; preflight reports a missing command before
-# install. Example: ssh edge.example.net 'curl -fsS -o /dev/null -w %{http_code} https://kodus-webhooks.example.com/health'
+# install. Example from a remote host:
+# ssh edge.example.net 'curl -fsS -o /dev/null -w %{http_code} https://kodus-webhooks.example.com/health'
 doctor_webhook_external_probe_cmd: ""
 
 # Backup destination: local, s3, or rsync.
