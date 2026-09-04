@@ -1,0 +1,16 @@
+---
+# Implemented in Task 11: backup → pin bump → FORCE_STOP → migrate → templates → doctor.
+- name: Codereviewer upgrade
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+  pre_tasks:
+    - name: Load documented defaults without overriding inventory
+      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+  tasks:
+    - name: Upgrade placeholder
+      ansible.builtin.debug:
+        msg: "upgrade.yml is implemented in Task 11"
+      tags:
+        - upgrade

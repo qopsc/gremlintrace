@@ -1,0 +1,6 @@
+---
+e2b_templates_api_url: http://127.0.0.1:8080
+e2b_templates_aliases:
+  - base
+  - kodus-sandbox
+  - kodus-sandbox-graph

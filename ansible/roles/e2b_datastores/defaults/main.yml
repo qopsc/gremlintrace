@@ -1,0 +1,4 @@
+---
+e2b_datastores_compose_project: e2b-data
+e2b_datastores_postgres_bind_host: 127.0.0.1
+e2b_datastores_postgres_port: 5433

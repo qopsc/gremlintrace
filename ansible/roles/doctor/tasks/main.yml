@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the doctor role
+  ansible.builtin.debug:
+    msg: "doctor role is implemented in task 10"
+  tags:
+    - doctor

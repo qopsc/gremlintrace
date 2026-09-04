@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the backup role
+  ansible.builtin.debug:
+    msg: "backup role is implemented in task M2"
+  tags:
+    - backup

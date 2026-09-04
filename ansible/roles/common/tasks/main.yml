@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the common role
+  ansible.builtin.debug:
+    msg: "common role is implemented in task 5"
+  tags:
+    - common

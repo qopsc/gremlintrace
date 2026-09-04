@@ -1,0 +1,19 @@
+# Build artifacts
+e2b/build/dist/
+
+# Ansible
+*.retry
+
+# Python / Node
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# Secrets and local env
+.env
+
+# Cloned upstream working copies
+.upstream/
+e2b/upstream/
+kodus-installer/

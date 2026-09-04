@@ -1,0 +1,3 @@
+---
+kodus_install_dir: /opt/kodus-installer
+kodus_compose_project: kodus

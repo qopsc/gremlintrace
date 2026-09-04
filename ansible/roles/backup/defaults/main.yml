@@ -1,0 +1,3 @@
+---
+backup_script_path: /usr/local/bin/qops-backup
+backup_e2b_gc_script_path: /usr/local/bin/qops-e2b-gc

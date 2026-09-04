@@ -1,0 +1,4 @@
+---
+e2b_services_install_prefix: /usr/local/lib/e2b
+e2b_services_config_dir: /etc/qops/e2b
+e2b_services_orchestrator_force_stop: false

@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the traefik role
+  ansible.builtin.debug:
+    msg: "traefik role is implemented in task 8"
+  tags:
+    - traefik

@@ -1,0 +1,53 @@
+---
+# All version pins for codereviewer. Bump only here; every other file references these keys.
+
+# E2B -------------------------------------------------------------------------
+
+# Upstream e2b-dev/infra git commit (full SHA). Bump after CI validates a new pin + patches.
+e2b_pin: "6e4ce14cdd12c4d6bca1ecf795840b3b9afba0a2"
+
+# Our built dist tarball version (first 7 chars of e2b_pin). Artifact name: e2b-<e2b_dist_version>.tar.gz
+e2b_dist_version: "6e4ce14"
+
+# Go toolchain for E2B builds (from upstream go.work). Build image: golang:<e2b_go_version>-bookworm
+e2b_go_version: "1.26.6"
+
+firecracker_version: "v1.14-0.2.0"
+kernel_version: "vmlinux-6.1.158-c1a568c"
+busybox_version: "1.36.1"
+
+# From upstream packages/envd/pkg/version.go at e2b_pin (also stamped into BUILD_INFO by the build pipeline).
+envd_version: "0.7.0"
+
+e2b_postgres_image: "postgres"
+e2b_postgres_tag: "18"
+e2b_redis_image: "redis"
+e2b_redis_tag: "8"
+e2b_clickhouse_image: "clickhouse/clickhouse-server"
+e2b_clickhouse_tag: "25.8.30.16"
+e2b_otel_collector_image: "otel/opentelemetry-collector-contrib"
+e2b_otel_collector_tag: "0.146.0"
+
+# Kodus -----------------------------------------------------------------------
+
+# Git ref of kodustech/kodus-installer to clone at install time.
+kodus_installer_ref: "c51648aac1e15eba9ef300e94df5f5cbd36c9171"
+
+# Kodus container image tag (IMAGE_TAG). Never use "latest" — always pin an explicit release tag.
+kodus_image_tag: "2.1.31"
+
+# Edge ------------------------------------------------------------------------
+
+# Traefik static binary installed under systemd (only service binding 0.0.0.0:80/443).
+traefik_version: "v3.3.4"
+
+# Toolchain -------------------------------------------------------------------
+
+# goose migration tool built into the E2B dist tarball (packages/db/go.mod at e2b_pin).
+goose_version: "v3.27.2"
+
+# Node.js major version for E2B template build step on the host.
+node_version: "22"
+
+# @kodus/kodus-graph pre-baked in sandbox templates (optional); Kodus installs at runtime if omitted.
+kodus_graph_version: "0.3.0"

@@ -1,0 +1,22 @@
+---
+- name: Codereviewer full install
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+  pre_tasks:
+    - name: Load documented defaults without overriding inventory
+      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+  roles:
+    - role: preflight
+    - role: common
+    - role: host_firewall
+    - role: docker
+    - role: e2b_host
+    - role: e2b_datastores
+    - role: e2b_services
+    - role: e2b_templates
+    - role: traefik
+    - role: kodus
+    - role: backup
+    - role: doctor

@@ -1,0 +1,8 @@
+---
+e2b_host_orchestrator_root: /orchestrator
+e2b_host_hugepages_mount: /mnt/hugepages
+e2b_host_fc_versions_dir: /fc-versions
+e2b_host_fc_kernels_dir: /fc-kernels
+e2b_host_fc_busybox_dir: /fc-busybox
+e2b_host_fc_envd_dir: /fc-envd
+e2b_host_dist_install_dir: /usr/local/lib/e2b

@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the e2b_host role
+  ansible.builtin.debug:
+    msg: "e2b_host role is implemented in task 6"
+  tags:
+    - e2b_host

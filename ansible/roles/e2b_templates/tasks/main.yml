@@ -1,0 +1,6 @@
+---
+- name: Placeholder for the e2b_templates role
+  ansible.builtin.debug:
+    msg: "e2b_templates role is implemented in task 8"
+  tags:
+    - e2b_templates
