@@ -86,6 +86,9 @@ PY
 }
 
 @test "systemd-analyze verify accepts each rendered e2b and traefik unit" {
+  if ! command -v systemd-analyze >/dev/null 2>&1; then
+    skip "systemd-analyze validation requires systemd tools"
+  fi
   dummy_root="${BATS_TMPDIR}/unit-bins"
   mkdir -p "${dummy_root}"
   ln -sf /bin/true "${dummy_root}/orchestrator"
