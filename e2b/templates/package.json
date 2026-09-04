@@ -1,0 +1,23 @@
+{
+  "name": "codereviewer-e2b-templates",
+  "private": true,
+  "type": "module",
+  "description": "E2B sandbox template definitions and host-side build script for self-hosted Kodus.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build-templates": "tsx build-templates.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "e2b": "2.46.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.12",
+    "tsx": "4.20.6",
+    "typescript": "5.9.2",
+    "vitest": "3.2.7"
+  }
+}

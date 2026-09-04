@@ -1,12 +1,21 @@
-.PHONY: lint test check syntax-check
+.PHONY: lint test check syntax-check templates-ci
 
 ANSIBLE_INVENTORY := ansible/inventory/example.yml
 PLAYBOOKS := $(wildcard ansible/playbooks/*.yml)
+TEMPLATES_DIR := e2b/templates
+TEMPLATES_STAMP := $(TEMPLATES_DIR)/node_modules/.ci-stamp
 
-lint: syntax-check
+$(TEMPLATES_STAMP): $(TEMPLATES_DIR)/package.json $(TEMPLATES_DIR)/package-lock.json
+	npm --prefix $(TEMPLATES_DIR) ci
+	@touch $(TEMPLATES_STAMP)
+
+templates-ci: $(TEMPLATES_STAMP)
+
+lint: syntax-check templates-ci
 	yamllint .
 	ansible-lint
-	shellcheck bootstrap.sh tests/bats/helpers/ansible-playbook
+	shellcheck bootstrap.sh tests/bats/helpers/ansible-playbook e2b/build/build.sh ci/*.sh
+	npm --prefix $(TEMPLATES_DIR) run typecheck
 
 syntax-check:
 	@set -e; \
@@ -15,7 +24,8 @@ syntax-check:
 		ansible-playbook --syntax-check -i $(ANSIBLE_INVENTORY) "$$pb"; \
 	done
 
-test:
+test: templates-ci
 	bats tests/bats/
+	npm --prefix $(TEMPLATES_DIR) test
 
 check: lint test

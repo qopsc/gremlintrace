@@ -15,6 +15,9 @@ e2b_go_version: "1.26.6"
 firecracker_version: "v1.14-0.2.0"
 kernel_version: "vmlinux-6.1.158-c1a568c"
 busybox_version: "1.36.1"
+firecracker_sha256: "ef22aec7cbffcf6cc44a8436a4db79f9e6fe5c52218c81af321dd20f10ad6e5d"
+kernel_sha256: "1982f8d5f1bc1680a36b0cdf126f605834b1633bba200d3281bccd53b86ff9ee"
+busybox_sha256: "d7cce939adb09a41a22a5f846d22ba8d576b38dbb2b46a5c77a3a3e27ec52520"
 
 # From upstream packages/envd/pkg/version.go at e2b_pin (also stamped into BUILD_INFO by the build pipeline).
 envd_version: "0.7.0"
@@ -49,5 +52,19 @@ goose_version: "v3.27.2"
 # Node.js major version for E2B template build step on the host.
 node_version: "22"
 
+# E2B JS SDK used by e2b/templates (exact version; e2b/templates/package.json must match).
+e2b_sdk_version: "2.46.1"
+
 # @kodus/kodus-graph pre-baked in sandbox templates (optional); Kodus installs at runtime if omitted.
 kodus_graph_version: "0.3.0"
+
+# CI lint toolchain (lint.yml only). Pins for the GitHub Actions lint job.
+actionlint_version: "1.7.7"
+actionlint_sha256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+ansible_core_version: "2.21.3"
+ansible_lint_version: "26.8.0"
+yamllint_version: "1.38.0"
+
+shellcheck_apt_version: "0.9.0-1"
+bats_apt_version: "1.10.0-1"
+node_ci_version: "22.22.2"
