@@ -1,0 +1,16 @@
+---
+# Implemented in M2: restore from a qops backup bundle.
+- name: Codereviewer restore
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+  pre_tasks:
+    - name: Load documented defaults without overriding inventory
+      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+  tasks:
+    - name: Restore placeholder
+      ansible.builtin.debug:
+        msg: "restore.yml is implemented in M2"
+      tags:
+        - restore

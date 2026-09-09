@@ -1,0 +1,11 @@
+---
+- name: Codereviewer preflight checks
+  hosts: codereviewer
+  become: true
+  vars_files:
+    - ../../versions.yml
+  pre_tasks:
+    - name: Load documented defaults without overriding inventory
+      ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+  roles:
+    - role: preflight

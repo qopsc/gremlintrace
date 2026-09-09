@@ -1,0 +1,4 @@
+---
+host_firewall_nftables_config_path: /etc/nftables/qops.nft
+host_firewall_nftables_service_name: nftables
+host_firewall_nftables_table_name: qops_filter

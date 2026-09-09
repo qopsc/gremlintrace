@@ -1,0 +1,115 @@
+---
+# Operator-facing configuration for codereviewer.
+# Version pins live in versions.yml (loaded by playbooks via vars_files).
+
+# Primary DNS domain for Kodus and E2B endpoints (e.g. example.com → kodus.example.com).
+qops_domain: "example.com"
+
+# TLS mode: acme_dns (ACME DNS-01), provided (customer cert files), or internal_ca.
+tls_mode: "acme_dns"
+
+# ACME DNS-01 provider name for lego (required when tls_mode=acme_dns).
+# Credentials: DNS-01 keys belong in /etc/qops/traefik-acme.env (or a vault
+# that lands there). Traefik must not EnvironmentFile /etc/qops/secrets.env.
+tls_acme_dns_provider: ""
+
+# ACME account email. Empty falls back to e2b_admin_email.
+tls_acme_email: ""
+
+# Customer-provided certificate paths (required when tls_mode=provided or internal_ca).
+tls_cert_path: ""
+tls_key_path: ""
+
+# Internal CA certificate path (required when tls_mode=internal_ca).
+tls_ca_path: ""
+
+# E2B artifact/template storage backend: local, s3, or nfs.
+e2b_storage_backend: "local"
+
+# Block device or directory for /orchestrator (XFS preferred). Empty = use default path under /var/lib/e2b.
+e2b_data_device: ""
+
+# Percentage of RAM reserved for hugetlbfs (remainder for overcommit hugepages).
+e2b_hugepages_percentage: 80
+
+# Total concurrent sandboxes cap (base_v1 tier is 20; installer adds an addons row for the rest).
+e2b_max_concurrent_sandboxes: 100
+
+# Extra concurrent template builds granted via the addons row (not a tier total).
+e2b_extra_concurrent_template_builds: 10
+
+# Maximum sandbox lifetime in hours (updates tier only when raised above default).
+e2b_max_sandbox_hours: 1
+
+# ClickHouse metrics retention (MODIFY TTL on E2B metrics tables).
+e2b_clickhouse_retention_days: 30
+
+# Paused-snapshot GC age threshold for qops-e2b-gc.
+e2b_snapshot_retention_hours: 168
+
+# Extra CIDRs sandboxes may reach (maps to ALLOW_SANDBOX_INTERNAL_CIDRS). Use for private git hosts.
+e2b_allow_sandbox_internal_cidrs: []
+
+# Firecracker host-network CIDR for sandbox slots.
+sandbox_host_cidr: "10.11.0.0/16"
+
+# Firecracker virtual-router CIDR.
+sandbox_vrt_cidr: "10.12.0.0/16"
+
+# E2B team seed email (API key written to /etc/qops/secrets.env on first run).
+e2b_admin_email: "admin@example.com"
+
+# Extra key/value pairs merged into Kodus .env (non-secret overrides).
+kodus_env_overrides: {}
+
+# LLM model id. "auto" lets Kodus pick; Anthropic keys still go in API_OPEN_AI_API_KEY.
+kodus_llm_provider_model: "auto"
+
+# OpenAI-compatible base URL for an on-prem endpoint. Empty leaves upstream unset.
+kodus_openai_force_base_url: ""
+
+# Set true only when the customer network breaks hairpin NAT. Then Kodus
+# containers get extra_hosts for api.e2b.<d> and sandbox.e2b.<d> pointing at
+# host-gateway, and .env sets E2B_API_URL / E2B_SANDBOX_URL to those names.
+kodus_extra_hosts_hairpin: false
+
+# Globally routable IPv4 for the sandbox isolation probe. Required: preflight
+# writes a failure report before install when this or qops_lan_ipv4 is empty or
+# invalid, rather than silently using a private address.
+qops_public_ipv4: ""
+
+# RFC1918/LAN IPv4 for the isolation probe. Required and must differ from
+# qops_public_ipv4.
+qops_lan_ipv4: ""
+
+# Command that probes kodus-webhooks from a host that is not this machine.
+# Required for a passing doctor run; preflight reports a missing command before
+# install. Example from a remote host:
+# ssh edge.example.net 'curl -fsS -o /dev/null -w %{http_code} https://kodus-webhooks.example.com/health'
+doctor_webhook_external_probe_cmd: ""
+
+# Backup destination: local, s3, or rsync. M1 implements local only.
+backup_target: "local"
+
+# Keep this many days of local backup bundles (qops-backup retention).
+backup_retention_days: 7
+
+# Uninstall requires an extra-var override. Default preserves customer data.
+qops_uninstall_confirm: false
+qops_uninstall_destroy_data: false
+
+# Disable Kodus product telemetry when true.
+kodus_telemetry_disabled: false
+
+# Optional Kodus license key (community edition leaves empty).
+# Set via vault or /etc/qops/secrets.env.
+kodus_license_key: ""
+
+# HTTPS base URL for release asset downloads (no trailing slash).
+# Leave empty to derive from qops_github_repository and e2b_dist_version in versions.yml.
+# Example override: https://github.com/qopsc/gremlintrace/releases/download/e2b-6e4ce14
+qops_release_base_url: ""
+
+# GitHub repository slug (owner/name) hosting codereviewer releases. Used when
+# qops_release_base_url is empty. Override when installing from a fork or mirror.
+qops_github_repository: "qopsc/gremlintrace"

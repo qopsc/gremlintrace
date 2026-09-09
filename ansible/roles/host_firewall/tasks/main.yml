@@ -1,0 +1,66 @@
+---
+- name: Disable firewalld when present
+  ansible.builtin.service:
+    name: firewalld
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: ansible_os_family == "RedHat"
+  tags:
+    - host_firewall
+
+- name: Ensure nftables config directory exists
+  ansible.builtin.file:
+    path: "{{ host_firewall_nftables_config_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - host_firewall
+
+- name: Render qops nftables ruleset
+  ansible.builtin.template:
+    src: qops.nft.j2
+    dest: "{{ host_firewall_nftables_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nft -c -f %s
+  notify: Load qops nftables ruleset
+  tags:
+    - host_firewall
+
+- name: Ensure nftables include for qops ruleset (Debian)
+  ansible.builtin.lineinfile:
+    path: /etc/nftables.conf
+    regexp: '^include "{{ host_firewall_nftables_config_path | regex_escape }}"'
+    line: 'include "{{ host_firewall_nftables_config_path }}"'
+    insertafter: EOF
+    create: true
+    mode: "0644"
+  when: ansible_os_family == "Debian"
+  notify: Load qops nftables ruleset
+  tags:
+    - host_firewall
+
+- name: Ensure nftables include for qops ruleset (RedHat)
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/nftables.conf
+    regexp: '^include "{{ host_firewall_nftables_config_path | regex_escape }}"'
+    line: 'include "{{ host_firewall_nftables_config_path }}"'
+    insertafter: EOF
+    create: true
+    mode: "0644"
+  when: ansible_os_family == "RedHat"
+  notify: Load qops nftables ruleset
+  tags:
+    - host_firewall
+
+- name: Ensure nftables service is enabled
+  ansible.builtin.service:
+    name: "{{ host_firewall_nftables_service_name }}"
+    enabled: true
+    state: started
+  tags:
+    - host_firewall

@@ -1,0 +1,126 @@
+---
+- name: Validate Docker address pools do not overlap sandbox CIDRs
+  ansible.builtin.command:
+    cmd: >-
+      python3 {{ role_path }}/files/cidr-overlaps.py
+      {{ item.base }} {{ sandbox_host_cidr }}
+  register: docker_pool_host_overlap
+  changed_when: false
+  failed_when: >-
+    docker_pool_host_overlap.rc != 0 or
+    (docker_pool_host_overlap.stdout | trim) == 'true'
+  loop: "{{ docker_address_pools }}"
+  loop_control:
+    label: "{{ item.base }}"
+  tags:
+    - docker
+
+- name: Validate Docker address pools do not overlap sandbox virtual-router CIDR
+  ansible.builtin.command:
+    cmd: >-
+      python3 {{ role_path }}/files/cidr-overlaps.py
+      {{ item.base }} {{ sandbox_vrt_cidr }}
+  register: docker_pool_vrt_overlap
+  changed_when: false
+  failed_when: >-
+    docker_pool_vrt_overlap.rc != 0 or
+    (docker_pool_vrt_overlap.stdout | trim) == 'true'
+  loop: "{{ docker_address_pools }}"
+  loop_control:
+    label: "{{ item.base }}"
+  tags:
+    - docker
+
+- name: Install Docker apt prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+  tags:
+    - docker
+
+- name: Add Docker apt GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+  when: ansible_os_family == "Debian"
+  tags:
+    - docker
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/{{ ansible_distribution | lower }}
+      {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+  when: ansible_os_family == "Debian"
+  tags:
+    - docker
+
+- name: Install Docker packages (Debian)
+  ansible.builtin.apt:
+    name: "{{ docker_packages_debian }}"
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+  notify: Restart docker
+  tags:
+    - docker
+
+- name: Add Docker dnf repository
+  ansible.builtin.yum_repository:
+    name: docker-ce
+    description: Docker CE Stable
+    baseurl: https://download.docker.com/linux/fedora/$releasever/$basearch/stable
+    gpgcheck: true
+    gpgkey: https://download.docker.com/linux/fedora/gpg
+    enabled: true
+  when: ansible_os_family == "RedHat"
+  tags:
+    - docker
+
+- name: Install Docker packages (RedHat)
+  ansible.builtin.dnf:
+    name: "{{ docker_packages_redhat }}"
+    state: present
+  when: ansible_os_family == "RedHat"
+  notify: Restart docker
+  tags:
+    - docker
+
+- name: Ensure docker config directory exists
+  ansible.builtin.file:
+    path: "{{ docker_daemon_config_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - docker
+
+- name: Render Docker daemon configuration
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: "{{ docker_daemon_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+  tags:
+    - docker
+
+- name: Ensure Docker service is enabled
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+  tags:
+    - docker

@@ -1,0 +1,13 @@
+---
+# Example inventory — add hosts under codereviewer and set connection variables.
+#   codereviewer-01:
+#     ansible_host: 203.0.113.10
+#     ansible_user: ubuntu
+#     ansible_become: true
+#     ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+all:
+  children:
+    codereviewer:
+      hosts: {}
+      vars:
+        ansible_python_interpreter: /usr/bin/python3
