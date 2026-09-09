@@ -1,0 +1,108 @@
+---
+services:
+  kodus-web:
+    ports: !override
+      - "{{ kodus_bind_host }}:{{ kodus_web_port }}:{{ kodus_web_port }}"
+{% if kodus_extra_hosts_hairpin | bool %}
+    extra_hosts:
+      - "api.e2b.{{ qops_domain }}:host-gateway"
+      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% endif %}
+{% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
+    environment:
+      NODE_EXTRA_CA_CERTS: "{{ kodus_ca_container_path }}"
+    volumes:
+      - "{{ tls_ca_path }}:{{ kodus_ca_container_path }}:ro,z"
+{% endif %}
+
+  api:
+    ports: !override
+      - "{{ kodus_bind_host }}:{{ kodus_api_port }}:3001"
+{% if kodus_extra_hosts_hairpin | bool %}
+    extra_hosts:
+      - "api.e2b.{{ qops_domain }}:host-gateway"
+      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% endif %}
+{% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
+    environment:
+      NODE_EXTRA_CA_CERTS: "{{ kodus_ca_container_path }}"
+    volumes:
+      - "{{ tls_ca_path }}:{{ kodus_ca_container_path }}:ro,z"
+{% endif %}
+{% if kodus_extra_hosts_hairpin | bool or (tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0)) %}
+
+  worker:
+{% if kodus_extra_hosts_hairpin | bool %}
+    extra_hosts:
+      - "api.e2b.{{ qops_domain }}:host-gateway"
+      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% endif %}
+{% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
+    environment:
+      NODE_EXTRA_CA_CERTS: "{{ kodus_ca_container_path }}"
+    volumes:
+      - "{{ tls_ca_path }}:{{ kodus_ca_container_path }}:ro,z"
+{% endif %}
+
+  worker-analytics:
+{% if kodus_extra_hosts_hairpin | bool %}
+    extra_hosts:
+      - "api.e2b.{{ qops_domain }}:host-gateway"
+      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% endif %}
+{% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
+    environment:
+      NODE_EXTRA_CA_CERTS: "{{ kodus_ca_container_path }}"
+    volumes:
+      - "{{ tls_ca_path }}:{{ kodus_ca_container_path }}:ro,z"
+{% endif %}
+{% endif %}
+
+  webhooks:
+    ports: !override
+      - "{{ kodus_bind_host }}:{{ kodus_webhooks_port }}:{{ kodus_webhooks_port }}"
+{% if kodus_extra_hosts_hairpin | bool %}
+    extra_hosts:
+      - "api.e2b.{{ qops_domain }}:host-gateway"
+      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% endif %}
+{% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
+    environment:
+      NODE_EXTRA_CA_CERTS: "{{ kodus_ca_container_path }}"
+    volumes:
+      - "{{ tls_ca_path }}:{{ kodus_ca_container_path }}:ro,z"
+{% endif %}
+
+  kodus-mcp-manager:
+    ports: !override
+      - "{{ kodus_bind_host }}:{{ kodus_mcp_port }}:{{ kodus_mcp_port }}"
+{% if kodus_extra_hosts_hairpin | bool %}
+    extra_hosts:
+      - "api.e2b.{{ qops_domain }}:host-gateway"
+      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% endif %}
+{% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
+    environment:
+      NODE_EXTRA_CA_CERTS: "{{ kodus_ca_container_path }}"
+    volumes:
+      - "{{ tls_ca_path }}:{{ kodus_ca_container_path }}:ro,z"
+{% endif %}
+
+  rabbitmq:
+    ports: !override
+      - "{{ kodus_bind_host }}:{{ kodus_rabbitmq_amqp_port }}:5672"
+      - "{{ kodus_bind_host }}:{{ kodus_rabbitmq_mgmt_port }}:15672"
+      - "{{ kodus_bind_host }}:{{ kodus_rabbitmq_metrics_port }}:15692"
+
+  db_kodus_postgres:
+    restart: unless-stopped
+    ports: !override
+      - "{{ kodus_bind_host }}:{{ kodus_postgres_port }}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:z
+
+  db_kodus_mongodb:
+    restart: unless-stopped
+    ports: !override
+      - "{{ kodus_bind_host }}:{{ kodus_mongo_port }}:27017"

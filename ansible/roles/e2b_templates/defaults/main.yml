@@ -1,0 +1,19 @@
+---
+e2b_templates_api_url: http://127.0.0.1:8080
+e2b_templates_aliases:
+  - base
+  - kodus-sandbox
+  - kodus-sandbox-graph
+e2b_templates_force: false
+e2b_templates_install_dir: /usr/local/lib/qops/e2b-templates
+# Controller-side path (playbook_dir). Copied onto the managed host before any
+# host-side command reads the sources.
+e2b_templates_controller_src_dir: "{{ playbook_dir }}/../../e2b/templates"
+e2b_templates_src_dir: /var/cache/qops/e2b-templates-src
+e2b_templates_domain: "e2b.{{ qops_domain }}"
+e2b_templates_base_image: ""
+e2b_templates_summary_path: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}/templates-last-summary.json"
+e2b_templates_node_bin: node
+e2b_templates_npm_bin: npm
+e2b_templates_node_image: node
+e2b_templates_node_tag: "{{ node_ci_version }}"

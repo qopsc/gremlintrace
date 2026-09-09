@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: QuantumOps
+  description: "M1 qops-backup timer, qops-e2b-gc timer, and uninstall helper."
+  license: proprietary
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+dependencies: []

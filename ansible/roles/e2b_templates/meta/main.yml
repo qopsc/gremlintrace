@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: QuantumOps
+  description: "Build base/kodus-sandbox/kodus-sandbox-graph templates via E2B SDK against local API."
+  license: proprietary
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+dependencies: []

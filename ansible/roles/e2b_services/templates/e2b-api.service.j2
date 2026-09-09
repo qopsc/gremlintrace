@@ -1,0 +1,22 @@
+[Unit]
+Description=E2B API
+# The API binary binds all interfaces on 8080 (HTTP) and 5009 (gRPC) by
+# design. Host nftables input is policy drop (loopback, established,
+# 22/80/443, and veth redirect targets only), so those listeners are not
+# reachable from the network.
+Wants=network-online.target
+After=e2b-orchestrator.service network-online.target
+Requires=e2b-orchestrator.service
+
+[Service]
+Type=simple
+User={{ e2b_services_user }}
+Group={{ e2b_services_group }}
+EnvironmentFile={{ e2b_services_api_env }}
+ExecStart={{ e2b_services_api_bin }} --port {{ e2b_services_api_port }}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

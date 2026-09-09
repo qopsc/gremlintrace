@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: QuantumOps
+  description: "qops-doctor: health, E2B smoke test, isolation probe, webhook reachability."
+  license: proprietary
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+dependencies: []

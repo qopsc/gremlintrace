@@ -1,0 +1,23 @@
+[Unit]
+Description=Traefik ingress for Kodus and E2B hostnames
+Documentation=https://doc.traefik.io/traefik/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ traefik_user }}
+Group={{ traefik_group }}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+# Dedicated ACME credentials only. Do not EnvironmentFile /etc/qops/secrets.env
+# (that file holds the E2B API key, database passwords, and the hash seed).
+EnvironmentFile=-{{ traefik_acme_env_file }}
+ExecStart={{ traefik_binary }} --configFile={{ traefik_static_config }}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Verify a qops M1 backup bundle is usable. Exit 0 only when dumps look real."""
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import json
+import sys
+import tarfile
+from pathlib import Path
+
+REQUIRED_FILES = (
+    "MANIFEST.json",
+    "SHA256SUMS",
+    "kodus-postgres.sql.gz",
+    "e2b-postgres.sql.gz",
+    "mongo.archive.gz",
+    "rabbitmq-definitions.json",
+    "etc-qops.tar.gz",
+)
+
+PG_MARKERS = (
+    b"PostgreSQL database dump",
+    b"PGDMP",
+    b"-- PostgreSQL",
+    b"SET statement_timeout",
+    b"SET standard_conforming_strings",
+)
+PG_TRAILER = b"PostgreSQL database dump complete"
+
+
+def fail(msg: str) -> int:
+    print(msg, file=sys.stderr)
+    return 1
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def gunzip_all(path: Path) -> bytes:
+    """Consume the complete gzip stream. Truncated files raise OSError."""
+    with gzip.open(path, "rb") as handle:
+        chunks: list[bytes] = []
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        return b"".join(chunks)
+
+
+def check_postgres_dump(path: Path) -> str | None:
+    if path.stat().st_size < 32:
+        return f"{path.name} is empty or too small"
+    try:
+        data = gunzip_all(path)
+    except (OSError, EOFError, gzip.BadGzipFile) as exc:
+        return f"{path.name} is not a valid gzip: {exc}"
+    if not data.strip():
+        return f"{path.name} uncompressed content is empty"
+    if not any(marker in data for marker in PG_MARKERS):
+        return (
+            f"{path.name} does not look like a PostgreSQL dump "
+            "(missing dump header)"
+        )
+    if PG_TRAILER not in data:
+        return (
+            f"{path.name} is truncated or header-only "
+            "(missing 'PostgreSQL database dump complete' trailer)"
+        )
+    return None
+
+
+def check_gzip_nonempty(path: Path) -> str | None:
+    if path.stat().st_size < 16:
+        return f"{path.name} is empty or too small"
+    try:
+        data = gunzip_all(path)
+    except (OSError, EOFError, gzip.BadGzipFile) as exc:
+        return f"{path.name} is not a valid gzip: {exc}"
+    if not data:
+        return f"{path.name} uncompressed content is empty"
+    return None
+
+
+def check_json(path: Path) -> str | None:
+    if path.stat().st_size < 2:
+        return f"{path.name} is empty"
+    try:
+        json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"{path.name} is not valid JSON: {exc}"
+    return None
+
+
+def check_tar_gz(path: Path) -> str | None:
+    if path.stat().st_size < 32:
+        return f"{path.name} is empty or too small"
+    try:
+        with tarfile.open(path, "r:gz") as archive:
+            members = archive.getmembers()
+    except (OSError, tarfile.TarError) as exc:
+        return f"{path.name} is not a valid tar.gz: {exc}"
+    if not members:
+        return f"{path.name} archive contains no members"
+    return None
+
+
+def parse_sha256sums(path: Path) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        digest, name = line.split(None, 1)
+        mapping[name] = digest
+    return mapping
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="qops-backup-verify")
+    parser.add_argument("bundle", help="backup directory or 'latest' symlink")
+    args = parser.parse_args()
+    bundle = Path(args.bundle).resolve()
+    if bundle.is_symlink() or bundle.name == "latest":
+        bundle = bundle.resolve()
+    if not bundle.is_dir():
+        return fail(f"backup bundle missing: {bundle}")
+
+    for name in REQUIRED_FILES:
+        path = bundle / name
+        if not path.is_file():
+            return fail(f"backup missing required file: {name}")
+
+    try:
+        manifest = json.loads((bundle / "MANIFEST.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return fail(f"MANIFEST.json is not usable: {exc}")
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        return fail("MANIFEST.json files list is empty")
+
+    checksums = parse_sha256sums(bundle / "SHA256SUMS")
+    for name in REQUIRED_FILES:
+        if name in {"SHA256SUMS", "MANIFEST.json"}:
+            continue
+        if name not in checksums:
+            return fail(f"SHA256SUMS missing entry for {name}")
+        actual = sha256_file(bundle / name)
+        if actual != checksums[name]:
+            return fail(f"checksum mismatch for {name}")
+
+    for name in ("kodus-postgres.sql.gz", "e2b-postgres.sql.gz"):
+        err = check_postgres_dump(bundle / name)
+        if err:
+            return fail(err)
+    err = check_gzip_nonempty(bundle / "mongo.archive.gz")
+    if err:
+        return fail(err)
+    err = check_json(bundle / "rabbitmq-definitions.json")
+    if err:
+        return fail(err)
+    err = check_tar_gz(bundle / "etc-qops.tar.gz")
+    if err:
+        return fail(err)
+
+    print(f"ok {bundle}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

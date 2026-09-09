@@ -1,0 +1,44 @@
+---
+doctor_qops_doctor_script: /usr/local/bin/qops-doctor
+doctor_preflight_report: /etc/qops/preflight.json
+doctor_report_path: /etc/qops/doctor.json
+doctor_preflight_script: /usr/local/lib/qops/run-preflight.sh
+doctor_template_store: "{{ e2b_services_template_storage_path | default('/var/lib/e2b/storage') }}"
+doctor_disk_paths:
+  - "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}"
+  - "{{ e2b_host_orchestrator_root | default('/orchestrator') }}"
+doctor_units:
+  - e2b-orchestrator
+  - e2b-api
+  - e2b-client-proxy
+  - traefik
+doctor_kodus_web_health: "http://127.0.0.1:{{ kodus_web_port | default(3000) }}/health"
+doctor_kodus_api_health: "http://127.0.0.1:{{ kodus_api_port | default(3001) }}/health"
+doctor_kodus_webhooks_health: "http://127.0.0.1:{{ kodus_webhooks_port | default(3332) }}/health"
+doctor_webhook_url: "https://kodus-webhooks.{{ qops_domain }}/health"
+doctor_webhook_external_probe_cmd: ""
+doctor_host_public_ip: "{{ qops_public_ipv4 | default('') }}"
+doctor_lan_ip: "{{ qops_lan_ipv4 | default('') }}"
+doctor_modules_dir: /lib/modules
+doctor_nbd_sysfs: /sys/block
+doctor_meminfo: /proc/meminfo
+doctor_disk_fail_percent: 95
+doctor_preflight_min_vcpus: "{{ preflight_min_vcpus | default(8) }}"
+doctor_preflight_min_ram_mb: "{{ preflight_min_ram_mb | default(32768) }}"
+doctor_preflight_min_disk_gb: "{{ preflight_min_disk_gb | default(200) }}"
+doctor_preflight_min_glibc: "{{ preflight_min_glibc_version | default('2.36') }}"
+doctor_preflight_min_kernel: "{{ preflight_min_kernel_version | default('6.1') }}"
+doctor_preflight_schema_version: "{{ preflight_schema_version | default(1) }}"
+doctor_preflight_orchestrator_root: "{{ preflight_orchestrator_root | default('/orchestrator') }}"
+doctor_egress_urls_debian:
+  - "https://download.docker.com/linux/ubuntu/dists/"
+  - "https://ghcr.io/"
+  - "https://registry-1.docker.io/v2/"
+  - "https://bun.sh/"
+  - "https://registry.npmjs.org/"
+doctor_egress_urls_fedora:
+  - "https://download.docker.com/linux/fedora/"
+  - "https://ghcr.io/"
+  - "https://registry-1.docker.io/v2/"
+  - "https://bun.sh/"
+  - "https://registry.npmjs.org/"

@@ -1,0 +1,30 @@
+[Unit]
+Description=E2B orchestrator and template-manager
+# The orchestrator binary binds all interfaces on 5007 (proxy) and 5008
+# (health) by design. Host nftables input is policy drop (loopback,
+# established, 22/80/443, and veth redirect targets only), so those
+# listeners are not reachable from the network.
+Requires=docker.service
+Wants=network-online.target
+After=docker.service network-online.target
+RequiresMountsFor={{ e2b_host_orchestrator_root }} {{ e2b_host_hugepages_mount }}
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile={{ e2b_services_orchestrator_env }}
+ExecStart={{ e2b_services_orchestrator_bin }}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+TasksMax=infinity
+OOMScoreAdjust=-900
+TimeoutStopSec=180
+# Firecracker processes live in /sys/fs/cgroup/e2b/sbx-* outside this unit's
+# cgroup, so systemctl stop drains live sandboxes up to the 35-minute ceiling
+# unless FORCE_STOP=true (startup env) or /orchestrator/force-stop exists at
+# SIGTERM (upgrade.yml writes both before systemctl stop).
+
+[Install]
+WantedBy=multi-user.target

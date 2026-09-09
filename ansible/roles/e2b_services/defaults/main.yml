@@ -1,0 +1,97 @@
+---
+e2b_services_install_prefix: /usr/local/lib/e2b
+e2b_services_current_dir: "{{ e2b_services_install_prefix }}/current"
+e2b_services_version_dir: "{{ e2b_services_install_prefix }}/{{ e2b_dist_version }}"
+e2b_services_config_dir: /etc/qops/e2b
+e2b_services_orchestrator_force_stop: false
+# site.yml seeds; upgrade.yml must set this false so the destructive seeder never runs.
+e2b_services_seed_enabled: true
+
+e2b_services_user: e2b
+e2b_services_group: e2b
+
+e2b_services_node_id: ""
+e2b_services_node_id_file: "{{ e2b_services_config_dir }}/node-id"
+e2b_services_node_ip: "127.0.0.1"
+
+e2b_services_orchestrator_env: "{{ e2b_services_config_dir }}/orchestrator.env"
+e2b_services_api_env: "{{ e2b_services_config_dir }}/api.env"
+e2b_services_client_proxy_env: "{{ e2b_services_config_dir }}/client-proxy.env"
+
+e2b_services_orchestrator_unit: e2b-orchestrator.service
+e2b_services_api_unit: e2b-api.service
+e2b_services_client_proxy_unit: e2b-client-proxy.service
+
+e2b_services_orchestrator_bin: "{{ e2b_services_current_dir }}/bin/orchestrator"
+e2b_services_api_bin: "{{ e2b_services_current_dir }}/bin/api"
+e2b_services_client_proxy_bin: "{{ e2b_services_current_dir }}/bin/client-proxy"
+e2b_services_seed_bin: "{{ e2b_services_current_dir }}/bin/e2b-seed"
+e2b_services_goose_bin: "{{ e2b_services_current_dir }}/bin/goose"
+e2b_services_envd_src: "{{ e2b_services_current_dir }}/bin/envd"
+e2b_services_envd_dest: "{{ e2b_host_fc_envd_dir | default('/fc-envd') }}/envd"
+
+e2b_services_postgres_migrations_dir: "{{ e2b_services_current_dir }}/migrations/postgres"
+e2b_services_clickhouse_migrations_dir: "{{ e2b_services_current_dir }}/migrations/clickhouse"
+
+e2b_services_api_port: 8080
+e2b_services_api_grpc_port: 5009
+e2b_services_orchestrator_port: 5008
+e2b_services_orchestrator_proxy_port: 5007
+e2b_services_client_proxy_port: 3002
+e2b_services_client_proxy_health_port: 3003
+
+e2b_services_local_orchestrator_address: "127.0.0.1:{{ e2b_services_orchestrator_port }}"
+e2b_services_api_internal_grpc_address: "127.0.0.1:{{ e2b_services_api_grpc_port }}"
+e2b_services_otel_grpc_endpoint: >-
+  {{ e2b_datastores_otel_bind_host }}:{{ e2b_datastores_otel_grpc_port }}
+e2b_services_redis_url: "{{ e2b_datastores_redis_bind_host }}:{{ e2b_datastores_redis_port }}"
+
+e2b_services_environment: local
+e2b_services_service_discovery_provider: local
+e2b_services_storage_provider: Local
+e2b_services_artifacts_registry_provider: Local
+e2b_services_orchestrator_services: orchestrator,template-manager
+e2b_services_envd_timeout: 60s
+e2b_services_loki_url: unset
+e2b_services_auth_provider_config: '{"jwt":[]}'
+e2b_services_volume_token_enabled: false
+e2b_services_max_parallel_memfile_snapshotting: 2
+e2b_services_orchestrator_lock_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}/orchestrator.lock"
+e2b_services_orchestrator_base_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}"
+# Patched orchestrator consults this marker at SIGTERM (FORCE_STOP env is
+# parsed once at process start). upgrade.yml creates it before systemctl stop.
+e2b_services_force_stop_marker: "{{ e2b_services_orchestrator_base_path }}/force-stop"
+e2b_services_force_stop_patch_filename: "{{ e2b_force_stop_patch_filename | default('0001-force-stop-marker.patch') }}"
+e2b_services_force_stop_patch_sha256: >-
+  {{ e2b_force_stop_patch_sha256
+     | default('4da7ddc0c07cbfd67d1afb0f49dcd4106c48f8bc1907e4c353c92b12d2ff2d9c') }}
+e2b_services_template_storage_path: "{{ common_e2b_lib_dir | default('/var/lib/e2b') }}/storage"
+e2b_services_build_cache_path: "{{ e2b_host_orchestrator_root | default('/orchestrator') }}/build"
+e2b_services_host_envd_path: "{{ e2b_services_envd_dest }}"
+e2b_services_host_kernels_dir: "{{ e2b_host_fc_kernels_dir | default('/fc-kernels') }}"
+e2b_services_firecracker_versions_dir: "{{ e2b_host_fc_versions_dir | default('/fc-versions') }}"
+e2b_services_host_busybox_dir: "{{ e2b_host_fc_busybox_dir | default('/fc-busybox') }}"
+
+e2b_services_postgres_password: ""
+e2b_services_clickhouse_username: e2b
+e2b_services_clickhouse_password: ""
+e2b_services_sandbox_access_token_hash_seed: ""
+
+e2b_services_dist_local_path: ""
+e2b_services_dist_download_url: ""
+e2b_services_dist_checksum_path: ""
+e2b_services_dist_checksum_url: ""
+e2b_services_dist_archive_path: ""
+e2b_services_dist_effective_url: ""
+e2b_services_dist_cache_dir: /var/cache/qops
+e2b_services_release_base_url_effective: >-
+  {{ qops_release_base_url if (qops_release_base_url | default('') | length > 0)
+     else ('https://github.com/' ~ qops_github_repository ~ '/releases/download/e2b-' ~ e2b_dist_version
+           if (qops_github_repository | default('') | length > 0) else '') }}
+
+e2b_services_clickhouse_ttl_helper: /usr/local/lib/qops/e2b-apply-clickhouse-ttl.sh
+e2b_services_health_retries: 60
+e2b_services_health_delay_seconds: 2
+e2b_services_base_tier_concurrent_sandboxes: 20
+e2b_services_addon_name: qops-concurrency
+e2b_services_seeded_key_file: "{{ e2b_services_config_dir }}/seeded-api-key"
