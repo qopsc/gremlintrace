@@ -1,0 +1,7 @@
+---
+profile: production
+exclude_paths:
+  - tests/fixtures/
+  - .venv/
+  - node_modules/
+  - .github/

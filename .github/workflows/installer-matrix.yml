@@ -1,0 +1,239 @@
+---
+name: Installer matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - versions.yml
+      - ansible/**
+      - bootstrap.sh
+      - ci/matrix/**
+      - e2b/**
+      - .github/workflows/installer-matrix.yml
+  pull_request:
+    paths:
+      - versions.yml
+      - ansible/**
+      - bootstrap.sh
+      - ci/matrix/**
+      - e2b/**
+      - .github/workflows/installer-matrix.yml
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    outputs:
+      run_install: ${{ steps.gate.outputs.run_install }}
+      skip_reason: ${{ steps.gate.outputs.skip_reason }}
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Gate on repository secrets
+        id: gate
+        env:
+          QOPS_CI_LLM_API_KEY: ${{ secrets.QOPS_CI_LLM_API_KEY }}
+          QOPS_CI_CANARY_REPO_TOKEN: ${{ secrets.QOPS_CI_CANARY_REPO_TOKEN }}
+          QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD: ${{ secrets.QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD }}
+        run: ./ci/matrix/gate-secrets.sh
+
+  skip-report:
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.run_install != 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report skipped matrix leg
+        env:
+          SKIP_REASON: ${{ needs.gate.outputs.skip_reason }}
+        run: |
+          {
+            echo "## Installer matrix — skipped"
+            echo
+            echo "${SKIP_REASON}"
+            echo
+            echo "Configure repository secrets \`QOPS_CI_LLM_API_KEY\`,"
+            echo "\`QOPS_CI_CANARY_REPO_TOKEN\`, and"
+            echo "\`QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD\` on the default branch to enable the"
+            echo "ubuntu-24.04 leg. Fork pull requests never receive secrets."
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+  ubuntu-2404:
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.run_install == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      QOPS_CI_LLM_API_KEY: ${{ secrets.QOPS_CI_LLM_API_KEY }}
+      QOPS_CI_CANARY_REPO_TOKEN: ${{ secrets.QOPS_CI_CANARY_REPO_TOKEN }}
+      QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD: ${{ secrets.QOPS_CI_WEBHOOK_EXTERNAL_PROBE_CMD }}
+      QOPS_CI_CANARY_REPO: ${{ vars.QOPS_CI_CANARY_REPO }}
+    steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Initialize step summary
+        run: |
+          {
+            echo "## Installer matrix — ubuntu-24.04"
+            echo
+            echo "Each check below is reported independently."
+            echo
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Read Node.js CI version
+        id: nodever
+        run: |
+          echo "version=$(python3 ci/yaml_versions.py get node_ci_version versions.yml)" \
+            >>"${GITHUB_OUTPUT}"
+
+      - name: Set up Node.js
+        # actions/setup-node v4.1.0
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af
+        with:
+          node-version: ${{ steps.nodever.outputs.version }}
+
+      - name: Stage E2B dist and FC artifacts
+        run: ./ci/matrix/stage-artifacts.sh
+
+      - name: Prepare host (modules, TLS, DNS, probe targets)
+        run: ./ci/matrix/prepare-host.sh
+
+      - name: Check — site.yml install
+        id: install
+        run: ./ci/matrix/run-bootstrap.sh --playbook site
+
+      - name: Report — site.yml install
+        if: ${{ always() && steps.install.outcome != 'skipped' }}
+        env:
+          OUTCOME: ${{ steps.install.outcome }}
+        run: |
+          status=fail
+          if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
+          ./ci/matrix/step-summary.sh "site.yml install" "${status}" \
+            "bootstrap.sh site.yml against localhost with CI inventory overrides."
+
+      - name: Check — doctor.yml
+        id: doctor
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: ./ci/matrix/run-bootstrap.sh --playbook doctor
+
+      - name: Report — doctor.yml
+        if: ${{ always() && steps.doctor.outcome != 'skipped' }}
+        env:
+          OUTCOME: ${{ steps.doctor.outcome }}
+        run: |
+          status=fail
+          if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
+          ./ci/matrix/step-summary.sh "doctor.yml" "${status}" \
+            "qops-doctor: preflight, units, E2B smoke, isolation probe, and the configured external webhook probe."
+
+      - name: Check — Kodus smoke (synthetic webhook)
+        id: kodus_smoke
+        if: ${{ !cancelled() && steps.doctor.outcome == 'success' }}
+        run: ./ci/matrix/kodus-smoke.sh
+
+      - name: Report — Kodus smoke
+        if: ${{ always() && steps.kodus_smoke.outcome != 'skipped' }}
+        env:
+          OUTCOME: ${{ steps.kodus_smoke.outcome }}
+        run: |
+          status=fail
+          if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
+          ./ci/matrix/step-summary.sh "Kodus smoke" "${status}" \
+            "Loopback health + signed synthetic GitHub webhook POST. Does not prove GitHub delivery, cloudflared, or a canary PR review."
+
+      - name: Check — second site.yml idempotency
+        id: idempotency
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: ./ci/matrix/check-idempotency.sh
+
+      - name: Report — idempotency
+        if: ${{ always() && steps.idempotency.outcome != 'skipped' }}
+        env:
+          OUTCOME: ${{ steps.idempotency.outcome }}
+        run: |
+          status=fail
+          if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
+          ./ci/matrix/step-summary.sh "second site.yml (idempotent)" "${status}" \
+            "PLAY RECAP changed=0 and no template build triggered."
+
+      - name: Check — mismatched API/DB pair fails fast
+        id: dist_pair
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: ./ci/matrix/check-dist-pair-mismatch.sh
+
+      - name: Report — API/DB pair guard
+        if: ${{ always() && steps.dist_pair.outcome != 'skipped' }}
+        env:
+          OUTCOME: ${{ steps.dist_pair.outcome }}
+        run: |
+          status=fail
+          if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
+          ./ci/matrix/step-summary.sh "API/DB migration pair guard" "${status}" \
+            "e2b-assert-dist-pair.sh rejects a tampered BUILD_INFO timestamp."
+
+      - name: Check — orchestrator restart leak reclaim
+        id: orch_restart
+        if: ${{ !cancelled() && steps.doctor.outcome == 'success' }}
+        run: ./ci/matrix/check-orchestrator-restart.sh
+
+      - name: Report — orchestrator restart
+        if: ${{ always() && steps.orch_restart.outcome != 'skipped' }}
+        env:
+          OUTCOME: ${{ steps.orch_restart.outcome }}
+        run: |
+          status=fail
+          if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
+          ./ci/matrix/step-summary.sh "orchestrator restart under load" "${status}" \
+            "systemctl restart e2b-orchestrator; assert no ns-*/veth/nbd/cgroup leaks."
+
+      - name: Check — upgrade.yml
+        id: upgrade
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: ./ci/matrix/check-upgrade.sh
+
+      - name: Report — upgrade.yml
+        if: ${{ always() && steps.upgrade.outcome != 'skipped' }}
+        env:
+          OUTCOME: ${{ steps.upgrade.outcome }}
+        run: |
+          status=fail
+          if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
+          ./ci/matrix/step-summary.sh "upgrade.yml (same pin)" "${status}" \
+            "Backup, verify, migrate, restart without seeder. Cross-pin bump needs a published previous dist (not exercised here)."
+
+      - name: Check — reboot persistence (not runnable)
+        id: reboot
+        if: always()
+        run: ./ci/matrix/check-reboot-skip.sh
+
+      - name: Report — reboot gate
+        if: always()
+        run: |
+          ./ci/matrix/step-summary.sh "reboot → doctor.yml" "skip" \
+            "GitHub-hosted runners cannot reboot. Requires self-hosted M2 leg or manual Phase 0 host."
+
+      - name: Fail job when any runnable check failed
+        if: always()
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          DOCTOR: ${{ steps.doctor.outcome }}
+          SMOKE: ${{ steps.kodus_smoke.outcome }}
+          IDEMPOTENCY: ${{ steps.idempotency.outcome }}
+          DIST_PAIR: ${{ steps.dist_pair.outcome }}
+          ORCH: ${{ steps.orch_restart.outcome }}
+          UPGRADE: ${{ steps.upgrade.outcome }}
+        run: |
+          fail=0
+          for label in INSTALL DOCTOR SMOKE IDEMPOTENCY DIST_PAIR ORCH UPGRADE; do
+            val="${!label}"
+            if [[ "${val}" == "failure" ]]; then
+              fail=1
+            fi
+          done
+          exit "${fail}"

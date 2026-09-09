@@ -1,0 +1,39 @@
+# Toolchain image for the E2B dist build. Go version is supplied at `docker build`
+# time from versions.yml (never baked in as a default — a default would be a pin).
+#
+# Source is NOT cloned here: pin and patches change far more often than the
+# toolchain, and a clone layer would bust cache on every bump. build.sh bind-mounts
+# a host-side checkout at `docker run`.
+ARG GO_VERSION
+ARG E2B_PIN
+
+FROM golang:${GO_VERSION}-bookworm
+
+ARG GO_VERSION
+ARG E2B_PIN
+ENV E2B_PIN=${E2B_PIN}
+ENV GO_VERSION=${GO_VERSION}
+# Installed image toolchain only. Modern Go otherwise auto-downloads a newer
+# one when go.work/go.mod requires it, which would mislabel BUILD_INFO.
+ENV GOTOOLCHAIN=local
+
+# git: upstream Makefiles call `git rev-parse` for commitSHA ldflags.
+# make: invoke upstream packages/{orchestrator,api,client-proxy,envd} Makefiles.
+# ca-certificates: HTTPS for Go module download inside `docker run`.
+# gcc + libc6-dev: CGO for the orchestrator (glibc-dynamic, portable to glibc >= 2.36).
+# linux-libc-dev: <linux/userfaultfd.h> required by orchestrator CGO.
+# file: post-build static vs dynamic linkage assertions.
+# hostname: packages/orchestrator/Makefile aborts if `hostname` cannot be resolved.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        make \
+        ca-certificates \
+        gcc \
+        libc6-dev \
+        linux-libc-dev \
+        file \
+        hostname \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --global --add safe.directory '*'
+
+WORKDIR /src
