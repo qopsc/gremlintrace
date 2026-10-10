@@ -1,0 +1,18 @@
+[Unit]
+Description=codereviewer host nftables input policy ({{ host_firewall_nftables_table_name }})
+# Load before Docker and the orchestrator add their own tables; this unit only
+# ever replaces inet {{ host_firewall_nftables_table_name }} and never flushes
+# the ruleset, so restarting it leaves Docker/orchestrator rules intact.
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target docker.service e2b-orchestrator.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f {{ host_firewall_nftables_config_path }}
+ExecReload=/usr/sbin/nft -f {{ host_firewall_nftables_config_path }}
+
+[Install]
+WantedBy=sysinit.target

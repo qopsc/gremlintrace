@@ -2,3 +2,7 @@
 host_firewall_nftables_config_path: /etc/nftables/qops.nft
 host_firewall_nftables_service_name: nftables
 host_firewall_nftables_table_name: qops_filter
+# SSH ports accepted from the network. Defaults to the port Ansible itself
+# connects on so the end-of-play ruleset load cannot lock the operator out.
+host_firewall_ssh_ports:
+  - "{{ ansible_port | default(22) }}"

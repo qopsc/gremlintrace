@@ -62,3 +62,5 @@ e2b_host_hugepages_service_name: e2b-hugepages.service
 e2b_host_nbd_max: 4096
 host_firewall_nftables_config_path: /etc/nftables/qops.nft
 host_firewall_nftables_table_name: qops_filter
+host_firewall_ssh_ports:
+  - "22"

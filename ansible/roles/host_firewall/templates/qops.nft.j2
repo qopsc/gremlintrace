@@ -16,6 +16,11 @@ table inet {{ host_firewall_nftables_table_name }} {
     iifname "veth-*" tcp dport 5016-5018 accept
     iifname "veth-*" drop
 
-    tcp dport { 22, 80, 443 } accept
+    # ICMP/ICMPv6 after the veth drop: neighbour discovery, router
+    # advertisements and path-MTU must work on the uplink, but sandboxes still
+    # cannot ping the host.
+    meta l4proto { icmp, ipv6-icmp } accept
+
+    tcp dport { {{ host_firewall_ssh_ports | map('string') | join(', ') }}, 80, 443 } accept
   }
 }

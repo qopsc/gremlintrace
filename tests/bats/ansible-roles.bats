@@ -689,3 +689,61 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
+
+@test "nftables accepts ICMP and ICMPv6 so neighbour discovery and PMTU keep working" {
+  nft_out="${BATS_TMPDIR}/qops-icmp.nft"
+  "${RENDER}" ansible/roles/host_firewall/templates/qops.nft.j2 "${VARS}" >"${nft_out}"
+  run python3 - "${nft_out}" <<'PY'
+import sys
+lines = [l.strip() for l in open(sys.argv[1]) if l.strip() and not l.strip().startswith('#')]
+icmp = [i for i, l in enumerate(lines) if 'icmp' in l and l.endswith('accept')]
+assert icmp, "no icmp accept rule under policy drop"
+text = "\n".join(lines[i] for i in icmp)
+assert 'ipv6-icmp' in text, "ICMPv6 (ND/RA) must be accepted"
+assert ' icmp' in text or 'l4proto { icmp' in text or 'l4proto {icmp' in text, "ICMPv4 must be accepted"
+veth_drop = next(i for i, l in enumerate(lines) if 'veth-*' in l and l.endswith('drop'))
+assert min(icmp) > veth_drop, "icmp accept must stay below the veth drop so sandboxes cannot ping the host"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "nftables SSH accept follows ansible_port instead of a hardcoded 22" {
+  default_out="${BATS_TMPDIR}/qops-ssh-default.nft"
+  custom_out="${BATS_TMPDIR}/qops-ssh-custom.nft"
+  render_with_defaults ansible/roles/host_firewall/templates/qops.nft.j2 '{}' >"${default_out}"
+  render_with_defaults ansible/roles/host_firewall/templates/qops.nft.j2 '{"ansible_port": 2222}' >"${custom_out}"
+  grep -Eq 'tcp dport \{ ?22, 80, 443 ?\} accept' "${default_out}"
+  grep -Eq 'tcp dport \{ ?2222, 80, 443 ?\} accept' "${custom_out}"
+  ! grep -Eq 'dport \{ ?22,' "${custom_out}"
+}
+
+@test "host_firewall owns its ruleset through a flush-free unit, not the distro nftables.service" {
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+tasks = yaml.safe_load((root / "ansible/roles/host_firewall/tasks/main.yml").read_text())
+for t in tasks:
+    svc = t.get("ansible.builtin.service") or t.get("ansible.builtin.systemd") or t.get("ansible.builtin.systemd_service") or {}
+    name = str(svc.get("name", ""))
+    # Ubuntu's nftables.service starts with `flush ruleset` and ExecStop flushes
+    # everything, including Docker's and the orchestrator's tables.
+    assert not (name.endswith("nftables") and svc.get("enabled") is True and "qops" not in name), t["name"]
+    li = t.get("ansible.builtin.lineinfile", {})
+    assert "nftables.conf" not in str(li.get("path", "")), "must not include the ruleset from the distro config"
+units = [t for t in tasks if "qops-nftables.service" in str(t.get("ansible.builtin.template", {}).get("dest", ""))]
+assert units, "no qops-nftables.service unit template task"
+enable = [t for t in tasks if "qops-nftables" in str((t.get("ansible.builtin.systemd_service") or t.get("ansible.builtin.systemd") or t.get("ansible.builtin.service") or {}).get("name", ""))]
+assert enable and enable[0].get("ansible.builtin.systemd_service", enable[0].get("ansible.builtin.systemd", enable[0].get("ansible.builtin.service")))["enabled"] is True
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+  unit="$(render_with_defaults ansible/roles/host_firewall/templates/qops-nftables.service.j2 '{}')"
+  printf '%s\n' "${unit}" | grep -q '^ExecStart=.*nft -f /etc/nftables/qops.nft'
+  ! printf '%s\n' "${unit}" | grep -qi 'flush ruleset'
+  ! printf '%s\n' "${unit}" | grep -q '^ExecStop='
+  printf '%s\n' "${unit}" | grep -q '^Before=.*docker.service'
+  printf '%s\n' "${unit}" | grep -q '^RemainAfterExit=yes'
+}
