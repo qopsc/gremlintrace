@@ -165,3 +165,41 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"x86_64"* ]]
 }
+
+write_galaxy_stub() {
+  # $1 = what `collection list` prints (installed collections)
+  cat >"${STUB_BIN}/ansible-galaxy" <<EOF
+#!/bin/bash
+printf 'ansible-galaxy %s\n' "\$*" >>"${BOOTSTRAP_ORDER_LOG}"
+if [[ "\${1:-}" == "collection" && "\${2:-}" == "list" ]]; then
+  printf '%s\n' "${1}"
+fi
+exit 0
+EOF
+  chmod +x "${STUB_BIN}/ansible-galaxy"
+}
+
+pin() {
+  python3 "${REPO_ROOT}/ci/yaml_versions.py" get "$1" "${REPO_ROOT}/versions.yml"
+}
+
+@test "bootstrap installs missing pinned collections before running the playbook" {
+  write_galaxy_stub ""
+  run "${BOOTSTRAP}" --skip-install --syntax-check
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  grep -q "ansible-galaxy collection install .*ansible.posix:$(pin ansible_posix_version)" "${BOOTSTRAP_ORDER_LOG}"
+  grep -q "ansible-galaxy collection install .*community.general:$(pin community_general_version)" "${BOOTSTRAP_ORDER_LOG}"
+  grep -q "ansible-galaxy collection install .*community.sops:$(pin community_sops_version)" "${BOOTSTRAP_ORDER_LOG}"
+  install_line="$(grep -n 'ansible-galaxy collection install' "${BOOTSTRAP_ORDER_LOG}" | head -n1 | cut -d: -f1)"
+  play_line="$(grep -n '^ansible-playbook' "${BOOTSTRAP_ORDER_LOG}" | head -n1 | cut -d: -f1)"
+  [ "${install_line}" -lt "${play_line}" ]
+}
+
+@test "bootstrap skips collection install when the pinned versions are already present" {
+  write_galaxy_stub "$(printf 'ansible.posix %s\ncommunity.general %s\ncommunity.sops %s' \
+    "$(pin ansible_posix_version)" "$(pin community_general_version)" "$(pin community_sops_version)")"
+  run "${BOOTSTRAP}" --skip-install --syntax-check
+  [ "$status" -eq 0 ]
+  ! grep -q 'ansible-galaxy collection install' "${BOOTSTRAP_ORDER_LOG}"
+}

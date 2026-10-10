@@ -66,3 +66,38 @@ setup() {
     --extra-vars "kodus_image_tag=latest"
   [ "$status" -ne 0 ]
 }
+
+@test "ansible.cfg enables the community.sops vars plugin beside host_group_vars" {
+  run env ANSIBLE_CONFIG="${REPO_ROOT}/ansible.cfg" ansible-config dump --only-changed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"VARIABLE_PLUGINS_ENABLED"* ]]
+  [[ "$output" == *"host_group_vars"* ]]
+  [[ "$output" == *"community.sops.sops"* ]]
+}
+
+@test "sops-encrypted host_vars decrypt transparently with an age key" {
+  if ! command -v sops >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+    skip "sops and age are not installed on this machine"
+  fi
+  work="${BATS_TMPDIR}/sops-inv"
+  rm -rf "${work}"
+  mkdir -p "${work}/host_vars/box1"
+  age-keygen -o "${work}/age.txt" 2>/dev/null
+  recipient="$(grep -o 'age1[0-9a-z]*' "${work}/age.txt" | head -n1)"
+  cat >"${work}/inventory.yml" <<'YML'
+all:
+  children:
+    codereviewer:
+      hosts:
+        box1:
+          ansible_connection: local
+YML
+  printf 'tls_acme_dns_credentials:\n  PORKBUN_API_KEY: pk_live_unit\n' >"${work}/host_vars/box1/secrets.sops.yml"
+  SOPS_AGE_KEY_FILE="${work}/age.txt" sops --encrypt --age "${recipient}" --in-place "${work}/host_vars/box1/secrets.sops.yml"
+  grep -q 'ENC\[' "${work}/host_vars/box1/secrets.sops.yml"
+  run env ANSIBLE_CONFIG="${REPO_ROOT}/ansible.cfg" SOPS_AGE_KEY_FILE="${work}/age.txt" \
+    ansible -i "${work}/inventory.yml" box1 -m debug -a "var=tls_acme_dns_credentials.PORKBUN_API_KEY"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pk_live_unit"* ]]
+}

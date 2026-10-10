@@ -34,3 +34,14 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"missing commands for make check"* ]]
 }
+
+@test "install-lint-tools installs every collection the roles and ansible.cfg need, pinned" {
+  for key in ansible_posix_version community_general_version community_sops_version; do
+    name="${key%_version}"
+    name="${name/_/.}"
+    grep -q "\"${name}:\$(yaml_get ${key})\"" "${INSTALL_SH}" || {
+      echo "missing pinned collection install for ${name} (${key})" >&2
+      return 1
+    }
+  done
+}

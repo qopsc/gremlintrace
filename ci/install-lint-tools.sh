@@ -144,7 +144,8 @@ fi
 ( unset LC_ALL
   ansible-galaxy collection install --force \
     "ansible.posix:$(yaml_get ansible_posix_version)" \
-    "community.general:$(yaml_get community_general_version)"
+    "community.general:$(yaml_get community_general_version)" \
+    "community.sops:$(yaml_get community_sops_version)"
 )
 
 sudo apt-get update -qq

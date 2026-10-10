@@ -159,6 +159,29 @@ ensure_ansible() {
   command -v ansible-playbook >/dev/null 2>&1 || die "ansible-playbook still not on PATH after pipx install"
 }
 
+# Collections the roles and ansible.cfg need, pinned in versions.yml. The pipx
+# `ansible` package bundles its own versions; an exact-version install into the
+# user collection path takes precedence and keeps every run on the pins.
+ensure_collections() {
+  if ! command -v ansible-galaxy >/dev/null 2>&1; then
+    log "warning: ansible-galaxy not on PATH; skipping collection pin check"
+    return 0
+  fi
+  local installed specs=() name key version
+  installed="$(ansible-galaxy collection list 2>/dev/null || true)"
+  for name in ansible.posix community.general community.sops; do
+    key="${name//./_}_version"
+    version="$(python3 "${SCRIPT_DIR}/ci/yaml_versions.py" get "${key}" "${SCRIPT_DIR}/versions.yml")"
+    if ! printf '%s\n' "${installed}" | awk -v n="${name}" -v v="${version}" '$1 == n && $2 == v { found = 1 } END { exit !found }'; then
+      specs+=("${name}:${version}")
+    fi
+  done
+  if [[ "${#specs[@]}" -gt 0 ]]; then
+    log "installing pinned collections: ${specs[*]}"
+    ansible-galaxy collection install "${specs[@]}"
+  fi
+}
+
 resolve_path() {
   local path="$1"
   if [[ "${path}" = /* ]]; then
@@ -219,6 +242,7 @@ done
 
 require_linux_x86_64
 ensure_ansible
+ensure_collections
 
 PLAYBOOK="$(resolve_path "ansible/playbooks/${PLAYBOOK_NAME}.yml")"
 [[ -f "${PLAYBOOK}" ]] || die "playbook not found: ${PLAYBOOK}"
