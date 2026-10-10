@@ -1392,3 +1392,26 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "changed" ]
 }
+
+@test "api migration timestamp extractor needs no binutils (strings absent on Ubuntu server)" {
+  extractor="${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-extract-api-migration-timestamp.sh"
+  work="${BATS_TMPDIR}/extract-no-strings"
+  rm -rf "${work}"
+  mkdir -p "${work}/bin"
+  # Ubuntu 24.04 server/cloud images do not ship binutils; emulate that by
+  # shadowing `strings` with a command-not-found stand-in.
+  printf '#!/usr/bin/env bash\necho "strings: command not found" >&2\nexit 127\n' >"${work}/bin/strings"
+  chmod 755 "${work}/bin/strings"
+  python3 - "${work}/api" <<'PY'
+import sys
+# Go string table: the 14-digit ldflag value sits between non-printables, and a
+# longer digit run nearby must not be mistaken for it.
+blob = b"\x7fELF\x00\x00main.expectedMigrationTimestamp\x00" + b"20240101120000" + b"\x00" \
+    + b"version=1.2.3\x00" + b"123456789012345678901234\x00" + b"\x01\x02"
+open(sys.argv[1], "wb").write(blob)
+PY
+  run env PATH="${work}/bin:${PATH}" bash "${extractor}" "${work}/api"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "20240101120000" ]
+}
