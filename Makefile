@@ -17,6 +17,7 @@ lint: syntax-check templates-ci
 	shellcheck bootstrap.sh tests/bats/helpers/ansible-playbook tests/fixtures/render-template.sh \
 	tests/fixtures/build-fc-artifacts-fixture.sh tests/fixtures/build-e2b-dist-fixture.sh \
 	tests/fixtures/stub-docker-compose-clickhouse-ttl.sh \
+	tests/fixtures/fake-docker-backup.sh tests/fixtures/fake-bin/rabbitmqctl tests/fixtures/fake-bin/pg_dump \
 	e2b/build/build.sh ci/*.sh ci/matrix/*.sh \
 	ansible/roles/preflight/files/run-preflight.sh \
 	ansible/roles/e2b_host/files/*.sh \

@@ -85,18 +85,16 @@ compose_e2b exec -T postgres \
   pg_dump -U "${E2B_PG_USER}" --format=plain --no-owner --no-acl "${E2B_PG_DB}" \
   | gzip -c >"${DEST}/e2b-postgres.sql.gz"
 
+# mongo-tools parses --config with a strict schema: only password, uri,
+# sslPEMKeyPassword and destinationPassword are accepted. Every other option
+# must be a flag, so the file carries just the password (kept off argv) and the
+# rest travel as positional parameters into the container-side shell.
 MONGO_CONFIG="$({
-  MONGO_USER="${MG_USER}" MONGO_PASSWORD="${MG_PASS}" MONGO_DATABASE="${MG_DB}" \
-    python3 - <<'PY'
+  MONGO_PASSWORD="${MG_PASS}" python3 - <<'PY'
 import json
 import os
 
-print(json.dumps({
-    "username": os.environ["MONGO_USER"],
-    "password": os.environ["MONGO_PASSWORD"],
-    "authenticationDatabase": "admin",
-    "db": os.environ["MONGO_DATABASE"],
-}))
+print(json.dumps({"password": os.environ["MONGO_PASSWORD"]}))
 PY
 })"
 # shellcheck disable=SC2016
@@ -105,8 +103,10 @@ printf '%s\n' "${MONGO_CONFIG}" |
     config_file="$(mktemp)"
     trap '\''rm -f "${config_file}"'\'' EXIT
     cat >"${config_file}"
-    mongodump --config "${config_file}" --archive --gzip
-  ' >"${DEST}/mongo.archive.gz"
+    mongodump --config "${config_file}" \
+      --username "$1" --authenticationDatabase admin --db "$2" \
+      --archive --gzip
+  ' sh "${MG_USER}" "${MG_DB}" >"${DEST}/mongo.archive.gz"
 
 # shellcheck disable=SC2016
 compose_kodus exec -T rabbitmq sh -eu -c '

@@ -256,3 +256,48 @@ EOF
     [ "$status" -eq 0 ]
   done
 }
+
+# Runs qops-backup end to end against a fake docker whose mongodump enforces
+# mongo-tools' strict --config contract (only password/uri/... keys allowed).
+run_backup_with_fakes() {
+  local root="$1"
+  rm -rf "${root}"
+  mkdir -p "${root}/kodus" "${root}/etc/qops/e2b-data" "${root}/backups"
+  cat >"${root}/kodus/.env" <<'ENV'
+API_PG_DB_USERNAME=kodusapi
+API_PG_DB_DATABASE=kodus_db
+API_MG_DB_USERNAME=kodusmg
+API_MG_DB_PASSWORD=s3cret-mongo
+API_MG_DB_DATABASE=kodus_mongo
+ENV
+  : >"${root}/kodus/docker-compose.yml"
+  : >"${root}/etc/qops/e2b-data/docker-compose.yml"
+  printf 'E2B_API_KEY=e2b\n' >"${root}/etc/qops/secrets.env"
+  run env \
+    QOPS_BACKUP_ROOT="${root}/backups" \
+    QOPS_BACKUP_DOCKER="${REPO_ROOT}/tests/fixtures/fake-docker-backup.sh" \
+    QOPS_BACKUP_SECRETS="${root}/etc/qops/secrets.env" \
+    QOPS_BACKUP_QOPS_DIR="${root}/etc/qops" \
+    QOPS_BACKUP_KODUS_DIR="${root}/kodus" \
+    QOPS_BACKUP_E2B_COMPOSE="${root}/etc/qops/e2b-data/docker-compose.yml" \
+    QOPS_BACKUP_VERIFY="${VERIFY}" \
+    QOPS_BACKUP_STAMP="2026-01-01T000000Z" \
+    FAKE_DOCKER_LOG="${root}/docker.log" \
+    FAKE_MONGODUMP_RECORD="${root}/mongodump.jsonl" \
+    bash "${BACKUP}"
+}
+
+@test "qops-backup produces a verified bundle with a strict mongodump" {
+  root="${BATS_TMPDIR}/backup-e2e"
+  run_backup_with_fakes "${root}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok ${root}/backups/2026-01-01T000000Z"* ]]
+  [ -L "${root}/backups/latest" ]
+  gzip -t "${root}/backups/latest/mongo.archive.gz"
+  grep -q '"--db": "kodus_mongo"' "${root}/mongodump.jsonl"
+  grep -q '"--username": "kodusmg"' "${root}/mongodump.jsonl"
+  grep -q '"--authenticationDatabase": "admin"' "${root}/mongodump.jsonl"
+  # The password never appears on the fake docker's argv log.
+  ! grep -q 's3cret-mongo' "${root}/docker.log"
+}

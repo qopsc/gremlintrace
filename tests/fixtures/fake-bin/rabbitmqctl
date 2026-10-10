@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "export_definitions" ]] || { echo "fake rabbitmqctl: $*" >&2; exit 64; }
+printf '{ "vhosts": [] }\n' >"$2"
