@@ -167,13 +167,34 @@
   tags:
     - e2b_host
 
-- name: Enable and activate swapfile
+# ansible.posix.mount never calls swapon: state=mounted on fstype=swap runs a
+# literal `mount none` and fails. fstab is managed with state=present and the
+# activation is an explicit swapon guarded by /proc/swaps for idempotence.
+- name: Register swapfile in fstab
   ansible.posix.mount:
     path: none
     src: "{{ e2b_host_swapfile_path }}"
     fstype: swap
     opts: sw,nofail
-    state: mounted
+    state: present
+  tags:
+    - e2b_host
+
+- name: Read active swap devices
+  ansible.builtin.slurp:
+    src: /proc/swaps
+  register: e2b_host_proc_swaps
+  tags:
+    - e2b_host
+
+- name: Activate swapfile
+  ansible.builtin.command:
+    cmd: swapon {{ e2b_host_swapfile_path }}
+  when: >-
+    e2b_host_swapfile_path not in
+    ((e2b_host_proc_swaps.content | b64decode).splitlines()
+     | map('split') | map('first') | list)
+  changed_when: true
   tags:
     - e2b_host
 
