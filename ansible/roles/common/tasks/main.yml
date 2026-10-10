@@ -39,6 +39,18 @@
   tags:
     - common
 
+# Stock Ubuntu 24.04 ships /etc/systemd/journald.conf but not the drop-in
+# directory; template fails with "Destination directory does not exist".
+- name: Ensure journald drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - common
+
 - name: Deploy journald size caps
   ansible.builtin.template:
     src: journald-qops.conf.j2
