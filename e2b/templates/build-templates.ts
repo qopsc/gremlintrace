@@ -102,6 +102,19 @@ function parseHttpApiUrl(raw: string): URL {
       [ENV_API_URL],
     );
   }
+  // `URL.hostname` brackets IPv6 literals (`[::1]`), so unwrap before comparing.
+  // Plain http may only carry the API key to loopback; a remote endpoint must be https.
+  const apiHost = normalizeHostname(parsed.hostname).replace(/^\[|\]$/g, '');
+  const loopback =
+    apiHost === 'localhost' || apiHost === '::1' || /^127\.\d+\.\d+\.\d+$/.test(apiHost);
+  if (parsed.protocol === 'http:' && !loopback) {
+    throw new ConfigError(
+      `Refusing to send ${ENV_API_KEY} in cleartext to ${ENV_API_URL}=${raw} (hostname ${parsed.hostname}). ` +
+        `Plain http is allowed only for loopback (127.0.0.0/8, localhost, ::1); use https for a remote endpoint. ` +
+        `Refusing to build.`,
+      [ENV_API_URL],
+    );
+  }
   return parsed;
 }
 
@@ -171,7 +184,7 @@ export function parseConnection(env: NodeJS.ProcessEnv): ConnectionOpts {
   return {
     apiKey,
     apiUrl,
-    ...(domainRaw ? { domain: domainRaw } : {}),
+    ...(domainHostname ? { domain: domainHostname } : {}),
   };
 }
 

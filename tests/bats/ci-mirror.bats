@@ -140,6 +140,22 @@ PY
   [ ! -e "${out}/firecrackers" ]
 }
 
+@test "mirror-e2b-artifacts removes stale versions from an existing output tree" {
+  local out kernel_ver
+  out="${TEST_TMPDIR}/artifacts-stale"
+  kernel_ver="$(python3 "${REPO_ROOT}/ci/yaml_versions.py" get kernel_version "${VERSIONS_FILE}")"
+  mkdir -p "${out}/kernels/vmlinux-stale/amd64" "${out}/firecrackers/old/amd64"
+  printf 'stale kernel\n' >"${out}/kernels/vmlinux-stale/amd64/vmlinux.bin"
+  printf 'stale fc\n' >"${out}/firecrackers/old/amd64/firecracker"
+  printf 'keep me\n' >"${out}/sentinel"
+  run "${REPO_ROOT}/ci/mirror-e2b-artifacts.sh" --versions "${VERSIONS_FILE}" --out "${out}"
+  [ "$status" -eq 0 ]
+  [ ! -e "${out}/kernels/vmlinux-stale" ]
+  [ ! -e "${out}/firecrackers/old" ]
+  [ -f "${out}/kernels/${kernel_ver}/amd64/vmlinux.bin" ]
+  [ -f "${out}/sentinel" ]
+}
+
 @test "pack-mirrored-artifacts preserves hierarchy inside tarball" {
   local artifacts packed extract
   artifacts="${TEST_TMPDIR}/artifacts"

@@ -88,6 +88,9 @@ def build_response(query: bytes, address: str, zones: list[str]) -> bytes | None
     return header + question + answer
 
 
+FORWARD_TIMEOUT_SECONDS = 2.0
+
+
 def forward(query: bytes, upstream: str, timeout: float) -> bytes | None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout)
@@ -131,7 +134,7 @@ def main() -> int:
         data, addr = sock.recvfrom(4096)
         response = build_response(data, args.address, zones)
         if response is None:
-            response = forward(data, args.upstream)
+            response = forward(data, args.upstream, FORWARD_TIMEOUT_SECONDS)
         if response:
             sock.sendto(response, addr)
 

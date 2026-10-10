@@ -157,3 +157,48 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(find "${upload}" -mindepth 1 -maxdepth 1 | wc -l)" -eq 4 ]
 }
+
+@test "dist-pair-mismatch check accepts the real assert script rejecting a tampered BUILD_INFO" {
+  local tarball
+  tarball="$(build_fixture_tarball "20240101120000" "20240101120000" "20240101120000")"
+  run env QOPS_CI_DIST_PATH="${tarball}" "${REPO_ROOT}/ci/matrix/check-dist-pair-mismatch.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dist-pair-mismatch: ok"* ]]
+}
+
+@test "dist-pair-mismatch check fails when the assert script cannot execute" {
+  local tarball stub
+  tarball="$(build_fixture_tarball "20240101120000" "20240101120000" "20240101120000")"
+  stub="${TEST_TMPDIR}/assert-127.sh"
+  printf '#!/usr/bin/env bash\nexit 127\n' >"${stub}"
+  chmod 755 "${stub}"
+  run env QOPS_CI_DIST_PATH="${tarball}" QOPS_CI_ASSERT_DIST_PAIR="${stub}" \
+    "${REPO_ROOT}/ci/matrix/check-dist-pair-mismatch.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"exited 127; expected rejection with exit 1"* ]]
+}
+
+@test "dist-pair-mismatch check fails when the assert script is not executable" {
+  local tarball stub
+  tarball="$(build_fixture_tarball "20240101120000" "20240101120000" "20240101120000")"
+  stub="${TEST_TMPDIR}/assert-noexec.sh"
+  printf '#!/usr/bin/env bash\nexit 1\n' >"${stub}"
+  chmod 644 "${stub}"
+  run env QOPS_CI_DIST_PATH="${tarball}" QOPS_CI_ASSERT_DIST_PAIR="${stub}" \
+    "${REPO_ROOT}/ci/matrix/check-dist-pair-mismatch.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"assert script missing or not executable"* ]]
+}
+
+@test "dist-pair-mismatch check fails when exit 1 comes without the mismatch message" {
+  local tarball stub
+  tarball="$(build_fixture_tarball "20240101120000" "20240101120000" "20240101120000")"
+  stub="${TEST_TMPDIR}/assert-silent.sh"
+  printf '#!/usr/bin/env bash\necho "unrelated failure" >&2\nexit 1\n' >"${stub}"
+  chmod 755 "${stub}"
+  run env QOPS_CI_DIST_PATH="${tarball}" QOPS_CI_ASSERT_DIST_PAIR="${stub}" \
+    "${REPO_ROOT}/ci/matrix/check-dist-pair-mismatch.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"without the expected mismatch message"* ]]
+  [[ "$output" == *"unrelated failure"* ]]
+}

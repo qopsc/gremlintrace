@@ -106,11 +106,19 @@ self-hosted cluster. There is no legitimate reason for this script to talk to
 E2B Cloud, and an opt-in would be a footgun (inherited CI env, copied `.env`).
 Point the variables at the local API instead: `E2B_API_URL=http://127.0.0.1:8080`.
 
+**Plain-http rejection.** TLS is deliberately off the template-build path, so
+`http://` is accepted only for loopback hosts (`localhost`, `::1`, anywhere in
+`127.0.0.0/8`). Any other `http://` endpoint **exits 2** without calling the
+SDK, because it would carry the team API key in cleartext to a remote host.
+Use `https://` for a remote `E2B_API_URL`.
+
 Values are passed explicitly as `Template.build` / `Template.exists` options
-(`apiKey`, `apiUrl`, and `domain` when set). When only `E2B_DOMAIN` is set, the
-script synthesizes `apiUrl=https://api.<domain>` so a leftover process
-`E2B_API_URL` cannot win (the SDK resolves
-`opts.apiUrl || process.env.E2B_API_URL || https://api.${domain}`).
+(`apiKey`, `apiUrl`, and `domain` when set). `E2B_DOMAIN` is passed as a
+hostname: a URL-form value (`E2B_DOMAIN=https://e2b.example.com/`) is reduced to
+`e2b.example.com` for both the SDK `domain` option and the synthesized
+`apiUrl`. When only `E2B_DOMAIN` is set, the script synthesizes
+`apiUrl=https://api.<domain>` so a leftover process `E2B_API_URL` cannot win
+(the SDK resolves `opts.apiUrl || process.env.E2B_API_URL || https://api.${domain}`).
 
 ## JSON summary schema
 
@@ -148,7 +156,7 @@ must read `templateId`.
 |---|---|---|
 | 0 | success | Every processed alias was `built` or `skipped` |
 | 1 | build failed | An SDK `exists`/`build` call threw (`action: failed`) |
-| 2 | config error | Missing `E2B_API_KEY`; missing both `E2B_API_URL` and `E2B_DOMAIN`; Cloud hostname (`e2b.app` or a child); malformed or non-http(s) `E2B_API_URL` |
+| 2 | config error | Missing `E2B_API_KEY`; missing both `E2B_API_URL` and `E2B_DOMAIN`; Cloud hostname (`e2b.app` or a child); malformed or non-http(s) `E2B_API_URL`; plain `http://` `E2B_API_URL` to a non-loopback host |
 
 Skipped aliases are **success** (exit 0). That is the `site.yml` idempotence
 path.

@@ -20,11 +20,21 @@ source /etc/qops/ci-matrix.env
 DOMAIN="${QOPS_CI_DOMAIN}"
 WEBHOOK_URL="https://kodus-webhooks.${DOMAIN}/github/webhook"
 ENV_FILE="/opt/kodus-installer/.env"
-SECRET=""
+# Root-only file: elevate the read, never the file mode.
+read_secret() {
+  local file="$1" key="$2" rc=0
+  sudo test -f "${file}" || {
+    echo "secret file missing: ${file}" >&2
+    return 1
+  }
+  sudo grep -E "^${key}=" "${file}" | head -n1 | cut -d= -f2- || rc=$?
+  if [[ "${rc}" -gt 1 ]]; then
+    echo "secret read failed for ${key} (rc=${rc}): ${file}" >&2
+    return 1
+  fi
+}
 
-if [[ -f "${ENV_FILE}" ]]; then
-  SECRET="$(grep -E '^API_GITHUB_WEBHOOK_SECRET=' "${ENV_FILE}" | head -n1 | cut -d= -f2- || true)"
-fi
+SECRET="$(read_secret "${ENV_FILE}" API_GITHUB_WEBHOOK_SECRET)"
 
 if [[ -z "${SECRET}" ]]; then
   echo "synthetic-github-webhook: webhook secret missing (API_GITHUB_WEBHOOK_SECRET)" >&2

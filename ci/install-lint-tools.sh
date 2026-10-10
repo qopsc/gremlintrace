@@ -110,7 +110,7 @@ if [[ "${VERIFY_ONLY}" == true ]]; then
   exit 0
 fi
 
-export PATH="${HOME}/.local/bin:/usr/local/bin:${PATH}"
+export PATH="${HOME}/.venvs/qops-lint/bin:${HOME}/.local/bin:/usr/local/bin:${PATH}"
 
 install_actionlint() {
   local version sha url archive tmp
@@ -128,7 +128,15 @@ install_actionlint() {
 
 install_actionlint
 
-python3 -m pip install --disable-pip-version-check --user -q \
+VENV_DIR="${HOME}/.venvs/qops-lint"
+if [[ ! -d "${VENV_DIR}" ]]; then
+  python3 -m venv "${VENV_DIR}"
+fi
+if [[ -n "${GITHUB_PATH:-}" ]]; then
+  echo "${VENV_DIR}/bin" >>"${GITHUB_PATH}"
+fi
+
+"${VENV_DIR}/bin/pip" install --disable-pip-version-check -q \
   "ansible-core==$(yaml_get ansible_core_version)" \
   "ansible-lint==$(yaml_get ansible_lint_version)" \
   "yamllint==$(yaml_get yamllint_version)"

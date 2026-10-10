@@ -144,8 +144,9 @@ jobs:
         run: |
           status=fail
           if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
-          ./ci/matrix/step-summary.sh "Kodus smoke" "${status}" \
-            "Loopback health + signed synthetic GitHub webhook POST. Does not prove GitHub delivery, cloudflared, or a canary PR review."
+          msg="Loopback health + signed synthetic GitHub webhook POST. Does not prove GitHub delivery,"
+          msg="${msg} cloudflared, or a canary PR review."
+          ./ci/matrix/step-summary.sh "Kodus smoke" "${status}" "${msg}"
 
       - name: Check — second site.yml idempotency
         id: idempotency
@@ -204,8 +205,9 @@ jobs:
         run: |
           status=fail
           if [[ "${OUTCOME}" == "success" ]]; then status=pass; fi
-          ./ci/matrix/step-summary.sh "upgrade.yml (same pin)" "${status}" \
-            "Backup, verify, migrate, restart without seeder. Cross-pin bump needs a published previous dist (not exercised here)."
+          msg="Backup, verify, migrate, restart without seeder. Cross-pin bump needs a published"
+          msg="${msg} previous dist (not exercised here)."
+          ./ci/matrix/step-summary.sh "upgrade.yml (same pin)" "${status}" "${msg}"
 
       - name: Check — reboot persistence (not runnable)
         id: reboot

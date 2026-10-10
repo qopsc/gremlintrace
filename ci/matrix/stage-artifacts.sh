@@ -7,7 +7,8 @@ STAGE_DIR="${QOPS_CI_STAGE_DIR:-/var/cache/qops/ci}"
 DIST_OUT="${STAGE_DIR}/e2b-dist.tar.gz"
 FC_OUT="${STAGE_DIR}/e2b-fc-artifacts.tar.gz"
 
-mkdir -p "${STAGE_DIR}"
+sudo mkdir -p "${STAGE_DIR}"
+sudo chown "$(id -u):$(id -g)" "${STAGE_DIR}"
 
 cd "${REPO_ROOT}"
 ./e2b/build/build.sh

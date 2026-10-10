@@ -9,8 +9,13 @@ setup() {
   if ! command -v docker >/dev/null 2>&1; then
     skip "docker not on PATH; container install path unverified on this machine"
   fi
+  if ! docker info >/dev/null 2>&1; then
+    skip "docker daemon not reachable; container install path unverified on this machine"
+  fi
 
-  run docker run --rm \
+  # bootstrap.sh refuses non-x86_64 hosts, so the container must be amd64 even on an
+  # arm64 dev machine (emulated). This is a no-op on the x86_64 CI runner.
+  run docker run --rm --platform linux/amd64 \
     -v "${REPO_ROOT}:/codereviewer:ro" \
     -w /codereviewer \
     ubuntu:24.04 \

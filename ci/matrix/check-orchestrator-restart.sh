@@ -11,10 +11,21 @@ if [[ "${QOPS_CI_ORCHESTRATOR_RESTART_SKIP_UNVERIFIED:-}" == "1" ]]; then
   exit 0
 fi
 
-API_KEY=""
-if [[ -f /etc/qops/secrets.env ]]; then
-  API_KEY="$(grep -E '^E2B_API_KEY=' /etc/qops/secrets.env | head -n1 | cut -d= -f2- || true)"
-fi
+# Root-only files: elevate the read, never the file mode.
+read_secret() {
+  local file="$1" key="$2" rc=0
+  sudo test -f "${file}" || {
+    echo "secret file missing: ${file}" >&2
+    return 1
+  }
+  sudo grep -E "^${key}=" "${file}" | head -n1 | cut -d= -f2- || rc=$?
+  if [[ "${rc}" -gt 1 ]]; then
+    echo "secret read failed for ${key} (rc=${rc}): ${file}" >&2
+    return 1
+  fi
+}
+
+API_KEY="$(read_secret /etc/qops/secrets.env E2B_API_KEY)"
 
 if [[ -z "${API_KEY}" ]]; then
   echo "orchestrator-restart: E2B_API_KEY missing; cannot create a sandbox" >&2

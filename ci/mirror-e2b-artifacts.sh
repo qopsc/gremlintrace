@@ -134,6 +134,9 @@ MANIFEST="${STAGE_DIR}/artifacts-SHA256SUMS"
 )
 
 mkdir -p "${OUT_DIR}"
+# Replace the three managed subtrees: merging into an existing OUT_DIR would keep
+# previous versions' files, which the new artifacts-SHA256SUMS does not list.
+rm -rf "${OUT_DIR}/firecrackers" "${OUT_DIR}/kernels" "${OUT_DIR}/busybox"
 cp -a "${STAGE_DIR}/firecrackers" "${OUT_DIR}/"
 cp -a "${STAGE_DIR}/kernels" "${OUT_DIR}/"
 cp -a "${STAGE_DIR}/busybox" "${OUT_DIR}/"

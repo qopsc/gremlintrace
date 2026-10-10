@@ -403,4 +403,55 @@ describe('runBuildTemplates', () => {
     expect(mockTemplate.exists.mock.calls.length).toBe(TEMPLATE_SPECS.length);
     expect(mockTemplate.build.mock.calls.length).toBe(TEMPLATE_SPECS.length);
   });
+
+  it('refuses plain http to a remote host and never calls the SDK', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'http://build.example.com',
+    });
+    expect(err).toContain(ENV_API_URL);
+    expect(err).toContain('http://build.example.com');
+    expect(err).toContain('cleartext');
+  });
+
+  it('refuses a loopback-looking remote hostname over plain http', async () => {
+    const err = await expectConfigRefusal({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'http://127.0.0.1.evil.com',
+    });
+    expect(err).toContain(ENV_API_URL);
+    expect(err).toContain('127.0.0.1.evil.com');
+  });
+
+  it('accepts plain http for every loopback spelling', async () => {
+    for (const url of ['http://127.0.0.2:8080', 'http://localhost:8080', 'http://[::1]:8080']) {
+      mockTemplate.build.mockClear();
+      const { exitCode } = await runBuildTemplates({
+        [ENV_API_KEY]: 'e2b_testkey',
+        [ENV_API_URL]: url,
+      });
+      expect(exitCode, url).toBe(EXIT_OK);
+      expect(buildCalls()[0]?.options.apiUrl, url).toBe(url);
+    }
+  });
+
+  it('accepts https to a remote host', async () => {
+    const { exitCode } = await runBuildTemplates({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_API_URL]: 'https://build.example.com',
+    });
+    expect(exitCode).toBe(EXIT_OK);
+    expect(buildCalls()[0]?.options.apiUrl).toBe('https://build.example.com');
+  });
+
+  it('normalizes a URL-form E2B_DOMAIN before handing it to the SDK', async () => {
+    const { exitCode } = await runBuildTemplates({
+      [ENV_API_KEY]: 'e2b_testkey',
+      [ENV_DOMAIN]: 'https://e2b.example.com/',
+    });
+
+    expect(exitCode).toBe(EXIT_OK);
+    expect(buildCalls()[0]?.options.domain).toBe('e2b.example.com');
+    expect(buildCalls()[0]?.options.apiUrl).toBe('https://api.e2b.example.com');
+  });
 });
