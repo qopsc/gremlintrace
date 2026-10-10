@@ -55,24 +55,24 @@ found = [name for name in forbidden if name in text]
 if found:
     raise SystemExit("forbidden directives: " + ", ".join(found))
 required = (
-    "Requires=docker.service",
+    "Wants=docker.service",
     "After=docker.service network-online.target",
     "RequiresMountsFor=/orchestrator /mnt/hugepages",
     "LimitNOFILE=1048576",
     "LimitMEMLOCK=infinity",
     "TasksMax=infinity",
     "OOMScoreAdjust=-900",
-    "TimeoutStopSec=180",
+    "TimeoutStopSec=2160",
     "FORCE_STOP=true",
 )
 for token in (
-    "Requires=docker.service",
+    "Wants=docker.service",
     "RequiresMountsFor=/orchestrator /mnt/hugepages",
     "LimitNOFILE=1048576",
     "LimitMEMLOCK=infinity",
     "TasksMax=infinity",
     "OOMScoreAdjust=-900",
-    "TimeoutStopSec=180",
+    "TimeoutStopSec=2160",
     "/sys/fs/cgroup/e2b/sbx-*",
     "FORCE_STOP=true",
 ):
@@ -1455,4 +1455,21 @@ PY
   echo "${output}"
   [ "$status" -eq 0 ]
   [ "$output" = "20240101120000" ]
+}
+
+@test "orchestrator unit survives a docker restart and can finish a sandbox drain" {
+  out="${BATS_TMPDIR}/e2b-orchestrator-deps.service"
+  render_with_defaults ansible/roles/e2b_services/templates/e2b-orchestrator.service.j2 \
+    '{"e2b_services_node_id":"node-fixture"}' >"${out}"
+  # Requires= propagates a docker restart (handler, docker-ce upgrade) into the
+  # orchestrator while sandboxes are live; Docker is only needed for template builds.
+  ! grep -q '^Requires=docker.service' "${out}"
+  grep -q '^Wants=.*docker.service' "${out}"
+  # hugepage allocation must have happened, not just the mount
+  grep -q '^After=.*e2b-hugepages.service' "${out}"
+  # An ordinary stop drains live sandboxes (upstream ceiling ~35 min) unless the
+  # force-stop marker is present; the stop timeout must not SIGKILL that drain.
+  timeout="$(sed -n 's/^TimeoutStopSec=\([0-9]*\)$/\1/p' "${out}")"
+  [ -n "${timeout}" ]
+  [ "${timeout}" -ge 2100 ]
 }
