@@ -2,21 +2,27 @@
 # Remove software (units, binaries, E2B runtime leftovers). Data is preserved
 # unless --destroy-data is passed. Refuses to run without --confirm.
 #
+# The backup archive is deliberately NOT covered by --destroy-data: destroying a
+# deployment is the moment its backups matter most, and rebuilding in place is a
+# normal reason to run this. Removing it needs the separate --destroy-backups.
+#
 # Ordering: stop and verify e2b-orchestrator is inactive, then nftables/netns/
 # veth/cgroup cleanup. Abort (including destroy-data) if that stop fails.
 set -euo pipefail
 
 CONFIRM=0
 DESTROY_DATA=0
+DESTROY_BACKUPS=0
 DRY_RUN=0
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --confirm) CONFIRM=1 ;;
     --destroy-data) DESTROY_DATA=1 ;;
+    --destroy-backups) DESTROY_BACKUPS=1 ;;
     --dry-run) DRY_RUN=1 ;;
     -h|--help)
-      echo "usage: qops-uninstall.sh --confirm [--destroy-data] [--dry-run]" >&2
+      echo "usage: qops-uninstall.sh --confirm [--destroy-data] [--destroy-backups] [--dry-run]" >&2
       exit 2
       ;;
     *)
@@ -46,6 +52,10 @@ DATA_PATHS=(
   "${QOPS_UNINSTALL_E2B_LIB:-/var/lib/e2b}"
   "${QOPS_UNINSTALL_ORCHESTRATOR:-/orchestrator}"
   "${QOPS_UNINSTALL_QOPS:-/etc/qops}"
+)
+
+# Separate from DATA_PATHS on purpose. Only --destroy-backups removes these.
+BACKUP_PATHS=(
   "${QOPS_UNINSTALL_BACKUPS:-/var/backups/qops}"
 )
 
@@ -66,6 +76,9 @@ SOFTWARE_PATHS=(
 
 if [[ -n "${QOPS_UNINSTALL_DATA_PATHS:-}" ]]; then
   read -r -a DATA_PATHS <<<"${QOPS_UNINSTALL_DATA_PATHS}"
+fi
+if [[ -n "${QOPS_UNINSTALL_BACKUP_PATHS:-}" ]]; then
+  read -r -a BACKUP_PATHS <<<"${QOPS_UNINSTALL_BACKUP_PATHS}"
 fi
 if [[ -n "${QOPS_UNINSTALL_SOFTWARE_PATHS:-}" ]]; then
   read -r -a SOFTWARE_PATHS <<<"${QOPS_UNINSTALL_SOFTWARE_PATHS}"
@@ -220,4 +233,20 @@ else
   done
 fi
 
-log "uninstall complete confirm=1 destroy_data=${DESTROY_DATA}"
+if [[ "${DESTROY_BACKUPS}" -eq 1 ]]; then
+  log "destroy-backups enabled"
+  for path in "${BACKUP_PATHS[@]}"; do
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+      log "attempt rm backups ${path}"
+      continue
+    fi
+    log "attempt rm backups ${path}"
+    rm -rf "${path}"
+  done
+else
+  for path in "${BACKUP_PATHS[@]}"; do
+    log "preserved backups ${path}"
+  done
+fi
+
+log "uninstall complete confirm=1 destroy_data=${DESTROY_DATA} destroy_backups=${DESTROY_BACKUPS}"

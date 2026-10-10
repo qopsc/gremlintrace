@@ -90,7 +90,18 @@ docker exec -it $(docker ps -qf name=rabbitmq) rabbitmqctl list_bindings
 **Do:**
 
 1. Restart Kodus worker after RabbitMQ is healthy: `docker compose -f /opt/kodus-installer/docker-compose.yml restart worker` (exact service name per upstream compose).
-2. If definitions are corrupt, restore from latest `/var/backups/qops/latest/rabbitmq-definitions.json` (manual import — `restore.yml` is M2).
+2. If definitions are corrupt, restore from latest `/var/backups/qops/latest/rabbitmq-definitions.json`
+   (manual import — `restore.yml` is M2). `rabbitmqctl` is the verified binary here: `qops-backup`
+   exports the bundle with `rabbitmqctl export_definitions` from this same container, and the pinned
+   Kodus RabbitMQ image also ships the management CLI. The import below is unverified end to end.
+
+   ```bash
+   RABBITMQ="$(docker ps -qf name=rabbitmq)"
+   docker cp /var/backups/qops/latest/rabbitmq-definitions.json \
+     "${RABBITMQ}":/tmp/rabbitmq-definitions.json
+   docker exec "${RABBITMQ}" rabbitmqctl import_definitions /tmp/rabbitmq-definitions.json
+   # alternative on images with the management CLI: rabbitmqadmin import rabbitmq-definitions.json
+   ```
 3. Re-run upstream `scripts/install.sh` only via the `kodus` role digest gate (do not hand-edit queues).
 
 ---
@@ -216,3 +227,7 @@ Header-chain walking (parent build IDs in on-disk headers) is an **unverified M1
 ```
 
 Uses `qops-uninstall` helper; destroys data only when `qops_uninstall_destroy_data=true`.
+
+Backups are separate. `/var/backups/qops` survives `qops_uninstall_destroy_data=true` and is
+removed only by `-e qops_uninstall_destroy_backups=true`. Reinstalling in place is a normal
+reason to uninstall, so the archive is preserved unless you ask for it to go.

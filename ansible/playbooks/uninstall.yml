@@ -15,7 +15,9 @@
         fail_msg: >-
           Refusing to uninstall. Re-run with -e qops_uninstall_confirm=true.
           Data is preserved by default; pass -e qops_uninstall_destroy_data=true
-          to also destroy /var/lib/e2b, /orchestrator, /etc/qops, and backups.
+          to also destroy /var/lib/e2b, /orchestrator, and /etc/qops.
+          Backups under /var/backups/qops survive destroy_data and are removed
+          only by -e qops_uninstall_destroy_backups=true.
       tags:
         - always
   tasks:
@@ -49,31 +51,16 @@
       tags:
         - uninstall
 
-    - name: Remove software and preserve data
+    - name: Remove software
       ansible.builtin.command:
-        argv:
-          - "{{ backup_uninstall_script_path | default('/usr/local/bin/qops-uninstall') }}"
-          - --confirm
+        argv: >-
+          {{ [backup_uninstall_script_path | default('/usr/local/bin/qops-uninstall'), '--confirm']
+             + (['--destroy-data'] if (qops_uninstall_destroy_data | bool) else [])
+             + (['--destroy-backups'] if (qops_uninstall_destroy_backups | default(false) | bool) else []) }}
       environment:
         QOPS_UNINSTALL_E2B_NFT_TABLES: "{{ e2b_services_nft_tables | default('v2-host-firewall') }}"
         QOPS_UNINSTALL_CLEANUP: /usr/local/lib/qops/e2b-cleanup-runtime.sh
       register: qops_uninstall_run
       changed_when: "'uninstall complete' in qops_uninstall_run.stdout"
-      when: not (qops_uninstall_destroy_data | bool)
-      tags:
-        - uninstall
-
-    - name: Remove software and destroy data
-      ansible.builtin.command:
-        argv:
-          - "{{ backup_uninstall_script_path | default('/usr/local/bin/qops-uninstall') }}"
-          - --confirm
-          - --destroy-data
-      environment:
-        QOPS_UNINSTALL_E2B_NFT_TABLES: "{{ e2b_services_nft_tables | default('v2-host-firewall') }}"
-        QOPS_UNINSTALL_CLEANUP: /usr/local/lib/qops/e2b-cleanup-runtime.sh
-      register: qops_uninstall_run_destroy
-      changed_when: "'uninstall complete' in qops_uninstall_run_destroy.stdout"
-      when: qops_uninstall_destroy_data | bool
       tags:
         - uninstall

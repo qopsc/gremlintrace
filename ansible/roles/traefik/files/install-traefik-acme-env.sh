@@ -45,6 +45,7 @@ PROVIDER_KEYS = {
     "ovh": {
         "OVH_ENDPOINT", "OVH_APPLICATION_KEY", "OVH_APPLICATION_SECRET", "OVH_CONSUMER_KEY",
     },
+    "porkbun": {"PORKBUN_API_KEY", "PORKBUN_SECRET_API_KEY"},
     "powerdns": {"PDNS_API_KEY", "PDNS_API_URL", "POWERDNS_API_KEY", "POWERDNS_API_URL"},
     "rfc2136": {
         "RFC2136_NAMESERVER", "RFC2136_TSIG_KEY", "RFC2136_TSIG_ALGORITHM", "RFC2136_TSIG_SECRET",
@@ -78,6 +79,12 @@ for raw in src.read_text(encoding="utf-8").splitlines():
     key, _, value = line.partition("=")
     if key in keys:
         selected.append(f"{key}={value}\n")
+
+if not selected:
+    raise SystemExit(
+        f"no ACME DNS credentials for provider {provider!r} in {src}: add one of "
+        f"{', '.join(sorted(keys))} to that file"
+    )
 
 dest.parent.mkdir(parents=True, exist_ok=True)
 fd, tmp = tempfile.mkstemp(prefix=dest.name + ".", dir=str(dest.parent))

@@ -55,12 +55,14 @@ Empty or invalid targets fail the probe (never silently pass).
 | `/etc/qops/traefik-acme.env` | 0600 root | DNS-01 credentials (not merged into `secrets.env`) |
 | `/etc/qops/e2b/*.env` | 0600 root | Service env with connection strings |
 | `/etc/qops/kodus/generated-secrets.env` | 0600 root | Upstream Kodus secrets |
-| `/opt/kodus-installer/.env` | 0600 root | Rendered Kodus config including LLM keys |
+| `/opt/kodus-installer/.env` | 0600 root | Rendered Kodus config including LLM keys and `API_E2B_KEY` (E2B team key) |
 | `/etc/qops/e2b/seeded-api-key` | 0600 root | Durable E2B team API key plaintext (first seed only) |
 
 Who can read: root and Ansible become user on the host. Container services receive only keys injected via compose env files. **Do not** expose `secrets.env` to unprivileged users or backup channels without encryption.
 
-E2B team API keys in Postgres are stored hashed; plaintext exists only in `secrets.env` / `seeded-api-key`.
+E2B team API keys in Postgres are stored hashed; plaintext exists in `secrets.env`,
+`seeded-api-key`, and Kodus `/opt/kodus-installer/.env` as `API_E2B_KEY` (see the rotation
+runbook in `docs/operations.md`, which updates both files).
 
 ## E2B seeder safety
 

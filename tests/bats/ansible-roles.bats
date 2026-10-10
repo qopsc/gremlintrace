@@ -535,3 +535,85 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"shortfall"* ]]
 }
+
+@test "no role runs a command referencing a control-machine-only path" {
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+# role_path and playbook_dir resolve on the CONTROL machine. command/shell/raw
+# execute on the managed host and transfer nothing, so a managed-host command
+# that interpolates either one fails on every real (non-localhost) target.
+CONTROL_ONLY = re.compile(r"\{\{[^}]*\b(role_path|playbook_dir)\b[^}]*\}\}")
+EXEC_MODULE = re.compile(r"^\s*(?:-\s+)?(?:ansible\.builtin\.)?(command|shell|raw):\s*$")
+ARG_KEY = re.compile(r"^\s*(cmd|_raw_params|argv)\s*:")
+NEW_TASK = re.compile(r"^\s*-\s+name:")
+
+bad = []
+for path in sorted(root.glob("ansible/roles/*/tasks/*.yml")):
+    in_exec = False
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if NEW_TASK.match(line):
+            in_exec = False
+        if EXEC_MODULE.match(line):
+            in_exec = True
+            continue
+        if in_exec and CONTROL_ONLY.search(line):
+            bad.append(f"{path.relative_to(root)}:{lineno}: {line.strip()}")
+
+if bad:
+    print("control-machine-only path inside a managed-host command:")
+    for entry in bad:
+        print("  " + entry)
+    raise SystemExit(1)
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "every qops helper a role invokes is installed by some role" {
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+# Only helper *scripts*; /usr/local/lib/qops also holds directories
+# (e2b-templates is the template source tree, not a script).
+REFERENCED = re.compile(r"/usr/local/lib/qops/([A-Za-z0-9._-]+\.(?:sh|py|mjs))")
+task_files = sorted(root.glob("ansible/roles/*/tasks/*.yml"))
+
+installed = set()
+for path in task_files:
+    text = path.read_text(encoding="utf-8")
+    # dest: /usr/local/lib/qops/<name>  and  dest: /usr/local/lib/qops (+ loop of names)
+    for match in re.finditer(r"dest:\s*/usr/local/lib/qops/([A-Za-z0-9._-]+)", text):
+        installed.add(match.group(1))
+    if re.search(r"dest:\s*\"?/usr/local/lib/qops/?\{\{", text) or re.search(
+        r"dest:\s*/usr/local/lib/qops/?\s*$", text, re.M
+    ):
+        for match in re.finditer(r"^\s*-\s+([A-Za-z0-9._-]+\.(?:sh|py|mjs))\s*$", text, re.M):
+            installed.add(match.group(1))
+        for match in re.finditer(r"src:\s*([A-Za-z0-9._-]+\.(?:sh|py|mjs))", text):
+            installed.add(match.group(1))
+
+referenced = {}
+for path in task_files:
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for match in REFERENCED.finditer(line):
+            referenced.setdefault(match.group(1), f"{path.relative_to(root)}:{lineno}")
+
+missing = {name: loc for name, loc in referenced.items() if name not in installed}
+if missing:
+    print("helpers invoked but never installed by any role:")
+    for name, loc in sorted(missing.items()):
+        print(f"  {name} referenced at {loc}")
+    raise SystemExit(1)
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}

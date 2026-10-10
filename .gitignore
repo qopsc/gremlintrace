@@ -17,3 +17,6 @@ __pycache__/
 .upstream/
 e2b/upstream/
 kodus-installer/
+
+# Local scratch space (review artifacts, throwaway worktrees)
+.scratch/

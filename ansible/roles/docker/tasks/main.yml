@@ -1,8 +1,31 @@
 ---
+# cidr-overlaps.py must be installed on the managed host before it is invoked.
+# role_path resolves on the control machine, and ansible.builtin.command
+# transfers nothing, so referencing it here fails on every remote target.
+- name: Ensure qops helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/qops
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - docker
+
+- name: Install docker helper scripts
+  ansible.builtin.copy:
+    src: cidr-overlaps.py
+    dest: /usr/local/lib/qops/cidr-overlaps.py
+    owner: root
+    group: root
+    mode: "0755"
+  tags:
+    - docker
+
 - name: Validate Docker address pools do not overlap sandbox CIDRs
   ansible.builtin.command:
     cmd: >-
-      python3 {{ role_path }}/files/cidr-overlaps.py
+      python3 /usr/local/lib/qops/cidr-overlaps.py
       {{ item.base }} {{ sandbox_host_cidr }}
   register: docker_pool_host_overlap
   changed_when: false
@@ -18,7 +41,7 @@
 - name: Validate Docker address pools do not overlap sandbox virtual-router CIDR
   ansible.builtin.command:
     cmd: >-
-      python3 {{ role_path }}/files/cidr-overlaps.py
+      python3 /usr/local/lib/qops/cidr-overlaps.py
       {{ item.base }} {{ sandbox_vrt_cidr }}
   register: docker_pool_vrt_overlap
   changed_when: false

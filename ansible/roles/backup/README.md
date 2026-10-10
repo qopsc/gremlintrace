@@ -17,7 +17,7 @@ does not need it.
 | `/usr/local/bin/qops-backup` | M1 backup entrypoint |
 | `/usr/local/bin/qops-backup-verify` | Fail closed on empty/corrupt bundles |
 | `/usr/local/bin/qops-e2b-gc` | Wrapper; python lives at `/usr/local/lib/qops/qops-e2b-gc` |
-| `/usr/local/bin/qops-uninstall` | Confirmation-gated uninstall helper |
+| `/usr/local/bin/qops-uninstall` | Confirmation-gated uninstall helper. `--destroy-data` does **not** remove `/var/backups/qops`; that needs `--destroy-backups`. |
 | `/var/backups/qops/<UTC-stamp>/` | One bundle per run |
 | `/var/backups/qops/latest` | Symlink written **after** verify succeeds |
 | `qops-backup.timer` | Calendar: `backup_timer_on_calendar` (default 02:00 UTC) |

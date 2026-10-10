@@ -73,7 +73,7 @@ For each item: mark **PASS / FAIL / SKIP**, date, operator, and measured values.
 - **Assumption:** Kill after pause leaves dirs under `LOCAL_TEMPLATE_STORAGE_BASE_PATH/<buildID>/` with memfile/rootfs diffs; nothing upstream deletes on Local FS.
 - **Feeds:** `qops-e2b-gc` retention (`e2b_snapshot_retention_hours`).
 - **Live IDs:** storage keys are `env_build_assignments.build_id` for live templates (`envs.deleted_at IS NULL`) and live snapshots (`snapshots.env_id`). `snapshots.id` is a row UUID, not a storage key.
-- **Header-chain walking:** on-disk headers can name parent `build_id`s. Parsing those headers reliably is **not implemented**. GC keeps the conservative assigned-`build_id` set only. Deleting an ancestor that a live snapshot header still points at is an **unverified M1 gap** — fail closed by not claiming chain-walking; do not delete based on `snapshots.id`. Live GC against Postgres is **unverified**.
+- **Header-chain walking:** on-disk headers can name parent `build_id`s. Parsing those headers reliably is **not implemented**, so `e2b-gc-query.sh` returns a conservative live set derived from the database only, and ancestry retention is not implemented either. An ancestor that a live snapshot header still points at can therefore be deleted — destructive GC must not be described as safe. Do not delete based on `snapshots.id` (row UUID, not a storage key). Live GC against Postgres is **unverified**.
 - **Result:** ☐ unchecked
 
 ### Hairpin NAT

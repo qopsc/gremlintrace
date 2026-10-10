@@ -9,8 +9,12 @@ qops_domain: "example.com"
 tls_mode: "acme_dns"
 
 # ACME DNS-01 provider name for lego (required when tls_mode=acme_dns).
-# Credentials: DNS-01 keys belong in /etc/qops/traefik-acme.env (or a vault
-# that lands there). Traefik must not EnvironmentFile /etc/qops/secrets.env.
+# Credentials: put the provider's lego keys (for example PORKBUN_API_KEY and
+# PORKBUN_SECRET_API_KEY) in /etc/qops/secrets.env. The traefik role copies only
+# that provider's keys into /etc/qops/traefik-acme.env (0600) and regenerates that
+# file on every run, so hand-written entries there do not survive. Providers
+# outside the built-in list also need traefik_acme_env_keys. Traefik must not
+# EnvironmentFile /etc/qops/secrets.env.
 tls_acme_dns_provider: ""
 
 # ACME account email. Empty falls back to e2b_admin_email.
@@ -97,6 +101,11 @@ backup_retention_days: 7
 # Uninstall requires an extra-var override. Default preserves customer data.
 qops_uninstall_confirm: false
 qops_uninstall_destroy_data: false
+
+# Backups are NOT covered by qops_uninstall_destroy_data. Destroying a deployment
+# is when its backups matter most, and reinstalling in place is a normal reason to
+# uninstall. Removing /var/backups/qops needs this separate opt-in.
+qops_uninstall_destroy_backups: false
 
 # Disable Kodus product telemetry when true.
 kodus_telemetry_disabled: false

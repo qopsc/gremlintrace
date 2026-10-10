@@ -19,6 +19,7 @@ rules:
 
 ignore: |
   .git/
+  .scratch/
   .venv/
   node_modules/
   tests/fixtures/upstream-kodus-installer/

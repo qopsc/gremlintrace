@@ -1176,6 +1176,8 @@ SANDBOX_ACCESS_TOKEN_HASH_SEED=hash-seed
 CF_DNS_API_TOKEN=cf-token
 AWS_ACCESS_KEY_ID=aws-id
 AWS_SECRET_ACCESS_KEY=aws-secret
+PORKBUN_API_KEY=porkbun-api-key
+PORKBUN_SECRET_API_KEY=porkbun-secret-key
 UNRELATED_SECRET=do-not-copy
 EOF
   run bash "${script}" "${secrets}" "${dest}" cloudflare
@@ -1193,6 +1195,29 @@ EOF
   grep -q 'AWS_ACCESS_KEY_ID=aws-id' "${route53_dest}"
   grep -q 'AWS_SECRET_ACCESS_KEY=aws-secret' "${route53_dest}"
   ! grep -q 'CF_DNS_API_TOKEN' "${route53_dest}"
+
+  porkbun_dest="${BATS_TMPDIR}/traefik-porkbun.env"
+  run bash "${script}" "${secrets}" "${porkbun_dest}" porkbun
+  [ "$status" -eq 0 ]
+  grep -q 'PORKBUN_API_KEY=porkbun-api-key' "${porkbun_dest}"
+  grep -q 'PORKBUN_SECRET_API_KEY=porkbun-secret-key' "${porkbun_dest}"
+  ! grep -q 'CF_DNS_API_TOKEN' "${porkbun_dest}"
+  ! grep -q 'AWS_' "${porkbun_dest}"
+}
+
+@test "ACME env installer rejects a provider with no credentials in the secrets file" {
+  script="${REPO_ROOT}/ansible/roles/traefik/files/install-traefik-acme-env.sh"
+  secrets="${BATS_TMPDIR}/credential-free-secrets.env"
+  dest="${BATS_TMPDIR}/traefik-nothing.env"
+  cat >"${secrets}" <<'EOF'
+E2B_API_KEY=e2b_0123456789abcdef0123456789abcdef01234567
+UNRELATED_SECRET=do-not-copy
+EOF
+  rm -f "${dest}"
+  run bash "${script}" "${secrets}" "${dest}" porkbun
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"no ACME DNS credentials for provider 'porkbun'"* ]]
+  [ ! -e "${dest}" ]
 }
 
 @test "rendered e2b-api router has no buffering middleware" {

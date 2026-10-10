@@ -211,3 +211,78 @@ EOF
   [ -d "${data}/keep" ]
   grep -q 'aborting destroy-data' "${root}/log"
 }
+
+# Regression: --destroy-data used to include /var/backups/qops, so tearing down a
+# deployment destroyed the backups taken to protect against exactly that.
+@test "destroy-data preserves the backup archive" {
+  root="${BATS_TMPDIR}/uninst-keep-backups"
+  data="${root}/data"
+  backups="${root}/backups"
+  rm -rf "${root}"
+  mkdir -p "${data}/keep" "${backups}/bundle" "${root}/netns" "${root}/net" "${root}/cgroup"
+  run env \
+    QOPS_UNINSTALL_LOG="${root}/log" \
+    QOPS_UNINSTALL_CLEANUP="${CLEANUP}" \
+    QOPS_UNINSTALL_SYSTEMCTL="$(command -v true)" \
+    QOPS_UNINSTALL_DOCKER="$(command -v true)" \
+    QOPS_UNINSTALL_DATA_PATHS="${data}" \
+    QOPS_UNINSTALL_BACKUP_PATHS="${backups}" \
+    QOPS_UNINSTALL_SOFTWARE_PATHS="${root}/software-missing" \
+    QOPS_UNINSTALL_NFT="$(command -v true)" \
+    QOPS_UNINSTALL_IP="$(command -v true)" \
+    QOPS_UNINSTALL_NETNS_DIR="${root}/netns" \
+    QOPS_UNINSTALL_SYS_CLASS_NET="${root}/net" \
+    QOPS_UNINSTALL_CGROUP="${root}/cgroup" \
+    bash "${UNINSTALL}" --confirm --destroy-data
+  [ "$status" -eq 0 ]
+  [ ! -d "${data}" ]
+  [ -d "${backups}/bundle" ]
+}
+
+@test "destroy-backups removes the archive and is independent of destroy-data" {
+  root="${BATS_TMPDIR}/uninst-drop-backups"
+  data="${root}/data"
+  backups="${root}/backups"
+  rm -rf "${root}"
+  mkdir -p "${data}/keep" "${backups}/bundle" "${root}/netns" "${root}/net" "${root}/cgroup"
+  run env \
+    QOPS_UNINSTALL_LOG="${root}/log" \
+    QOPS_UNINSTALL_CLEANUP="${CLEANUP}" \
+    QOPS_UNINSTALL_SYSTEMCTL="$(command -v true)" \
+    QOPS_UNINSTALL_DOCKER="$(command -v true)" \
+    QOPS_UNINSTALL_DATA_PATHS="${data}" \
+    QOPS_UNINSTALL_BACKUP_PATHS="${backups}" \
+    QOPS_UNINSTALL_SOFTWARE_PATHS="${root}/software-missing" \
+    QOPS_UNINSTALL_NFT="$(command -v true)" \
+    QOPS_UNINSTALL_IP="$(command -v true)" \
+    QOPS_UNINSTALL_NETNS_DIR="${root}/netns" \
+    QOPS_UNINSTALL_SYS_CLASS_NET="${root}/net" \
+    QOPS_UNINSTALL_CGROUP="${root}/cgroup" \
+    bash "${UNINSTALL}" --confirm --destroy-backups
+  [ "$status" -eq 0 ]
+  [ -d "${data}/keep" ]
+  [ ! -d "${backups}" ]
+}
+
+@test "uninstall.yml passes destroy-backups only when opted in" {
+  playbook="${REPO_ROOT}/ansible/playbooks/uninstall.yml"
+  # destroy_data must not imply destroy-backups in the rendered argv
+  run python3 - "${playbook}" <<'PY'
+import pathlib
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+assert "--destroy-backups" in text, "playbook never passes --destroy-backups"
+assert "qops_uninstall_destroy_backups" in text, "playbook does not read the opt-in variable"
+# The two flags must be gated on different variables.
+data_gate = text.index("'--destroy-data'")
+backup_gate = text.index("'--destroy-backups'")
+data_clause = text[data_gate:backup_gate]
+assert "qops_uninstall_destroy_data" in data_clause, data_clause
+backup_clause = text[backup_gate:backup_gate + 200]
+assert "qops_uninstall_destroy_backups" in backup_clause, backup_clause
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
