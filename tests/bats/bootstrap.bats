@@ -203,3 +203,52 @@ pin() {
   [ "$status" -eq 0 ]
   ! grep -q 'ansible-galaxy collection install' "${BOOTSTRAP_ORDER_LOG}"
 }
+
+# --- sops / age controller prerequisites -------------------------------------
+
+make_sops_inventory() {
+  local inv="${TEST_TMPDIR}/sops-inv"
+  mkdir -p "${inv}/host_vars/box1"
+  cp "${REPO_ROOT}/ansible/inventory/example.yml" "${inv}/example.yml"
+  printf 'sops:\n  age: []\n' >"${inv}/host_vars/box1/secrets.sops.yml"
+  printf '%s\n' "${inv}/example.yml"
+}
+
+@test "bootstrap refuses to run when encrypted host_vars exist but sops is missing" {
+  inv="$(make_sops_inventory)"
+  run "${BOOTSTRAP}" --skip-install --syntax-check --inventory "${inv}"
+  echo "${output}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sops"* ]]
+  [[ "$output" == *"secrets.sops.yml"* ]]
+  ! grep -q '^ansible-playbook' "${BOOTSTRAP_ORDER_LOG}" 2>/dev/null
+}
+
+@test "bootstrap refuses to run when sops is present but no age key is configured" {
+  inv="$(make_sops_inventory)"
+  printf '#!/bin/bash\nexit 0\n' >"${STUB_BIN}/sops"
+  chmod +x "${STUB_BIN}/sops"
+  run env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_FILE XDG_CONFIG_HOME="${TEST_TMPDIR}/nocfg" \
+    "${BOOTSTRAP}" --skip-install --syntax-check --inventory "${inv}"
+  echo "${output}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"age"* ]]
+  [[ "$output" == *"SOPS_AGE_KEY_FILE"* ]]
+}
+
+@test "bootstrap proceeds when sops and an age key file are available" {
+  inv="$(make_sops_inventory)"
+  printf '#!/bin/bash\nexit 0\n' >"${STUB_BIN}/sops"
+  chmod +x "${STUB_BIN}/sops"
+  printf 'AGE-SECRET-KEY-1TEST\n' >"${TEST_TMPDIR}/age.txt"
+  run env SOPS_AGE_KEY_FILE="${TEST_TMPDIR}/age.txt" \
+    "${BOOTSTRAP}" --skip-install --syntax-check --inventory "${inv}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  grep -q '^ansible-playbook' "${BOOTSTRAP_ORDER_LOG}"
+}
+
+@test "bootstrap does not require sops when the inventory has no encrypted files" {
+  run "${BOOTSTRAP}" --skip-install --syntax-check
+  [ "$status" -eq 0 ]
+}

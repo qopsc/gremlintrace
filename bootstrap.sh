@@ -182,6 +182,26 @@ ensure_collections() {
   fi
 }
 
+# Operator secrets are age-encrypted *.sops.yml files under the inventory's
+# host_vars/group_vars, decrypted on this machine by community.sops. Fail here
+# with a plain message instead of deep inside the vars plugin.
+check_sops_prerequisites() {
+  local inv_dir encrypted key_default
+  inv_dir="$(cd "$(dirname "${INVENTORY}")" && pwd)"
+  encrypted="$(find "${inv_dir}/host_vars" "${inv_dir}/group_vars" -type f \
+    \( -name '*.sops.yml' -o -name '*.sops.yaml' -o -name '*.sops.json' \) 2>/dev/null | head -n1 || true)"
+  [[ -n "${encrypted}" ]] || return 0
+  if ! command -v sops >/dev/null 2>&1; then
+    die "inventory has encrypted vars (${encrypted}) but sops is not on PATH; install sops and age on this control machine (see docs/install.md)"
+  fi
+  key_default="${XDG_CONFIG_HOME:-${HOME}/.config}/sops/age/keys.txt"
+  if [[ -z "${SOPS_AGE_KEY:-}" && -z "${SOPS_AGE_KEY_CMD:-}" ]] \
+    && [[ -z "${SOPS_AGE_KEY_FILE:-}" || ! -f "${SOPS_AGE_KEY_FILE}" ]] \
+    && [[ ! -f "${key_default}" ]]; then
+    die "inventory has encrypted vars (${encrypted}) but no age private key is configured; set SOPS_AGE_KEY_FILE to your age key (or place it at ${key_default})"
+  fi
+}
+
 resolve_path() {
   local path="$1"
   if [[ "${path}" = /* ]]; then
@@ -241,6 +261,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_linux_x86_64
+check_sops_prerequisites
 ensure_ansible
 ensure_collections
 

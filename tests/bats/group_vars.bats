@@ -93,11 +93,37 @@ all:
           ansible_connection: local
 YML
   printf 'tls_acme_dns_credentials:\n  PORKBUN_API_KEY: pk_live_unit\n' >"${work}/host_vars/box1/secrets.sops.yml"
-  SOPS_AGE_KEY_FILE="${work}/age.txt" sops --encrypt --age "${recipient}" --in-place "${work}/host_vars/box1/secrets.sops.yml"
+  # sops resolves .sops.yaml from the working directory upward; run from the
+  # scratch tree so the repo config (which only covers ansible/inventory) is not used.
+  (cd "${work}" && SOPS_AGE_KEY_FILE="${work}/age.txt" sops --encrypt --age "${recipient}" --in-place host_vars/box1/secrets.sops.yml)
   grep -q 'ENC\[' "${work}/host_vars/box1/secrets.sops.yml"
   run env ANSIBLE_CONFIG="${REPO_ROOT}/ansible.cfg" SOPS_AGE_KEY_FILE="${work}/age.txt" \
     ansible -i "${work}/inventory.yml" box1 -m debug -a "var=tls_acme_dns_credentials.PORKBUN_API_KEY"
   echo "${output}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"pk_live_unit"* ]]
+}
+
+@test "repo .sops.yaml encrypts host_vars secrets with age and ships an example file" {
+  cfg="${REPO_ROOT}/.sops.yaml"
+  [ -f "${cfg}" ]
+  run python3 - "${cfg}" <<'PY'
+import re, sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1]))
+rules = cfg["creation_rules"]
+target = "ansible/inventory/host_vars/box1/secrets.sops.yml"
+match = [r for r in rules if re.search(r["path_regex"], target)]
+assert match, "no creation rule matches %s" % target
+rule = match[0]
+assert "age" in rule, "rule must use age recipients"
+assert not any(k in rule for k in ("kms", "gcp_kms", "azure_keyvault", "pgp")), "age only"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+  example="${REPO_ROOT}/ansible/inventory/host_vars/example-host/secrets.sops.yml.example"
+  [ -f "${example}" ]
+  grep -q '^tls_acme_dns_credentials:' "${example}"
+  grep -q '^kodus_openai_api_key:' "${example}"
+  grep -q '^kodus_license_key:' "${example}"
 }

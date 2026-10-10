@@ -1,0 +1,12 @@
+---
+# sops creation rules for operator secrets (age only; no cloud KMS, no PGP).
+#
+# One encrypted file per host: ansible/inventory/host_vars/<host>/secrets.sops.yml
+# (start from host_vars/example-host/secrets.sops.yml.example). Replace the
+# recipient below with your operator age public key (age-keygen -y keys.txt) and
+# keep the matching private key on the control machine only
+# (SOPS_AGE_KEY_FILE). community.sops decrypts these files when bootstrap.sh
+# runs; the ciphertext is safe to commit.
+creation_rules:
+  - path_regex: ansible/inventory/(host_vars|group_vars)/.*\.sops\.ya?ml$
+    age: age1replace0with0your0operator0recipient0before0first0use0000000000000

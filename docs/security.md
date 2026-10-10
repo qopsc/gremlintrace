@@ -52,11 +52,13 @@ Empty or invalid targets fail the probe (never silently pass).
 | Location | Mode | Contents |
 |---|---|---|
 | `/etc/qops/secrets.env` | 0600 root | DB passwords, `E2B_API_KEY`, `SANDBOX_ACCESS_TOKEN_HASH_SEED`, generated placeholders |
-| `/etc/qops/traefik-acme.env` | 0600 root | DNS-01 credentials (not merged into `secrets.env`) |
+| `/etc/qops/traefik-acme.env` | 0600 root | DNS-01 credentials from `tls_acme_dns_credentials` (never read from `secrets.env`) |
 | `/etc/qops/e2b/*.env` | 0600 root | Service env with connection strings |
 | `/etc/qops/kodus/generated-secrets.env` | 0600 root | Upstream Kodus secrets |
 | `/opt/kodus-installer/.env` | 0600 root | Rendered Kodus config including LLM keys and `API_E2B_KEY` (E2B team key) |
 | `/etc/qops/e2b/seeded-api-key` | 0600 root | Durable E2B team API key plaintext (first seed only) |
+
+Operator-supplied secrets (`tls_acme_dns_credentials`, `kodus_openai_api_key`, `kodus_license_key`) are kept age-encrypted in `ansible/inventory/host_vars/<host>/secrets.sops.yml` and decrypted only on the control machine by `community.sops` (age private key: `SOPS_AGE_KEY_FILE`, never in the repo). They pass to the host as task input (`no_log`) and exist in plaintext only in the 0600 files above.
 
 Who can read: root and Ansible become user on the host. Container services receive only keys injected via compose env files. **Do not** expose `secrets.env` to unprivileged users or backup channels without encryption.
 

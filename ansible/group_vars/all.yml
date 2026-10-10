@@ -112,8 +112,8 @@ qops_uninstall_destroy_backups: false
 # Disable Kodus product telemetry when true.
 kodus_telemetry_disabled: false
 
-# Optional Kodus license key (community edition leaves empty).
-# Set via vault or /etc/qops/secrets.env.
+# Optional Kodus license key (community edition leaves empty). Secret: set it in
+# the host's sops-encrypted host_vars, not here.
 kodus_license_key: ""
 
 # HTTPS base URL for release asset downloads (no trailing slash).

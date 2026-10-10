@@ -15,16 +15,18 @@ Collect before install:
 | Primary domain | `qops_domain` | e.g. `example.com` → `kodus.example.com`, `api.e2b.example.com` |
 | Wildcard DNS | DNS provider | `api.e2b.<d>` and `*.e2b.<d>` must resolve to the host’s public IP |
 | TLS mode | `tls_mode` | M1: `acme_dns` or `provided`. `internal_ca` is M2. |
-| ACME DNS-01 | `tls_acme_dns_provider`, `/etc/qops/traefik-acme.env` | Credentials **not** in `secrets.env` |
+| ACME DNS-01 | `tls_acme_dns_provider`, `tls_acme_dns_credentials` (sops) | Lego env vars for the provider; the traefik role writes them to `/etc/qops/traefik-acme.env` (0600) |
 | Provided cert | `tls_cert_path`, `tls_key_path` | Wildcard or SANs covering all hostnames above |
 | Git provider | Kodus `.env` webhook URLs | One `API_<PROVIDER>_CODE_MANAGEMENT_WEBHOOK` per provider |
 | GitHub App / OAuth | Register after install | URLs printed by the `kodus` role |
-| LLM | `kodus_openai_api_key` / `kodus_openai_force_base_url` | Cloud key or on-prem OpenAI-compatible endpoint |
+| LLM | `kodus_openai_api_key` (sops) / `kodus_openai_force_base_url` | Cloud key or on-prem OpenAI-compatible endpoint |
 | E2B release | `qops_github_repository` or `qops_release_base_url` | Dist tag `e2b-<e2b_dist_version>` from `versions.yml` |
 | Isolation probe IPs | `qops_public_ipv4`, `qops_lan_ipv4` | Globally routable public IP and distinct RFC1918 LAN IP for `qops-doctor` |
 | Optional private git | `e2b_allow_sandbox_internal_cidrs` | Sandbox egress to on-prem forge hosts |
 
-Secrets are generated into `/etc/qops/secrets.env` (mode `0600`) and Kodus `generated-secrets.env`; never commit them.
+Operator-supplied secrets (`tls_acme_dns_credentials`, `kodus_openai_api_key`, `kodus_license_key`) live in one age-encrypted file per host, `ansible/inventory/host_vars/<host>/secrets.sops.yml`, decrypted on the control machine by `community.sops` when `bootstrap.sh` runs. The ciphertext is safe to commit; the age private key is not. Host-generated secrets land in `/etc/qops/secrets.env` (mode `0600`) and Kodus `generated-secrets.env`; never commit those.
+
+Control-machine prerequisites: `sops` and `age` (`brew install sops age` / distro packages), an age key (`age-keygen -o ~/.config/sops/age/keys.txt`), and its public recipient in the repo `.sops.yaml`. `bootstrap.sh` refuses to run when encrypted vars exist but `sops` or the key is missing.
 
 ## Prerequisites
 
@@ -45,9 +47,15 @@ M1 supports **Ubuntu 24.04** only on Debian family (`ansible/roles/common` rejec
 
 1. **Configure inventory** — copy `ansible/inventory/example.yml`, add the host under `codereviewer`, set `ansible_host`, `ansible_user`, `ansible_become`.
 
-2. **Set variables** — edit `ansible/group_vars/all.yml` (or host vars): `qops_domain`, `tls_mode`, LLM keys via vault, `qops_public_ipv4` / `qops_lan_ipv4`, release URL if not using the default GitHub slug.
+2. **Set variables** — edit `ansible/group_vars/all.yml` (or host vars): `qops_domain`, `tls_mode`, `tls_acme_dns_provider`, `qops_public_ipv4` / `qops_lan_ipv4`, release URL if not using the default GitHub slug.
 
-3. **Optional preflight only:**
+3. **Encrypt secrets** — copy `ansible/inventory/host_vars/example-host/secrets.sops.yml.example` to `ansible/inventory/host_vars/<host>/secrets.sops.yml`, fill in `tls_acme_dns_credentials` (lego env vars for your provider), `kodus_openai_api_key`, and optionally `kodus_license_key`, then:
+
+   ```bash
+   sops --encrypt --in-place ansible/inventory/host_vars/<host>/secrets.sops.yml
+   ```
+
+4. **Optional preflight only:**
 
    ```bash
    ./bootstrap.sh --playbook preflight --limit <host>
@@ -55,7 +63,7 @@ M1 supports **Ubuntu 24.04** only on Debian family (`ansible/roles/common` rejec
 
    Inspect `/etc/qops/preflight.json` on the target.
 
-4. **Full install:**
+5. **Full install:**
 
    ```bash
    ./bootstrap.sh --limit <host>
@@ -63,7 +71,7 @@ M1 supports **Ubuntu 24.04** only on Debian family (`ansible/roles/common` rejec
 
    This runs `ansible/playbooks/site.yml`: preflight through kodus, then backup timer installation and `qops-doctor`.
 
-5. **Verify:**
+6. **Verify:**
 
    ```bash
    ./bootstrap.sh --playbook doctor --limit <host>
@@ -89,7 +97,7 @@ Register these in the Git provider. Webhooks must use the **dedicated** `kodus-w
 
 | Mode | M1 support |
 |---|---|
-| `acme_dns` | Supported — DNS-01 credentials in `/etc/qops/traefik-acme.env` |
+| `acme_dns` | Supported — `tls_acme_dns_credentials` from the host's sops file, written to `/etc/qops/traefik-acme.env` |
 | `provided` | Supported — install cert/key paths before `site.yml` |
 | `internal_ca` | **Not supported in M1** — role fails explicitly |
 
