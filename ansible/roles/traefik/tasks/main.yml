@@ -268,18 +268,37 @@
   tags:
     - traefik
 
+# The install command below is no_log (its stdin carries the credentials), so
+# the common mistake, no credentials configured, is caught here with a readable
+# message. Values are never printed.
+- name: Require ACME DNS credentials when tls_mode is acme_dns
+  ansible.builtin.assert:
+    that:
+      - tls_acme_dns_credentials is mapping
+      - tls_acme_dns_credentials | length > 0
+    fail_msg: >-
+      tls_mode=acme_dns with tls_acme_dns_provider={{ tls_acme_dns_provider }} needs
+      tls_acme_dns_credentials, a mapping of the provider's lego environment
+      variables (for porkbun: PORKBUN_API_KEY and PORKBUN_SECRET_API_KEY).
+      Put it in the host's sops-encrypted host_vars
+      (ansible/inventory/host_vars/<host>/secrets.sops.yml); see docs/install.md.
+  when: tls_mode == "acme_dns"
+  tags:
+    - traefik
+
 - name: Install dedicated Traefik ACME credentials file
   ansible.builtin.command:
     cmd: >-
       /usr/local/lib/qops/install-traefik-acme-env.sh
-      {{ common_qops_secrets_file }}
       {{ traefik_acme_env_file }}
       {{ tls_acme_dns_provider }}
       {{ traefik_acme_env_keys | join(',') }}
+    stdin: "{{ tls_acme_dns_credentials | to_json }}"
   when: tls_mode == "acme_dns"
   register: traefik_acme_env
   changed_when: (traefik_acme_env.stdout | trim) == "installed"
   no_log: true
+  notify: Restart traefik
   tags:
     - traefik
 

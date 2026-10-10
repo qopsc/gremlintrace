@@ -9,13 +9,15 @@ qops_domain: "example.com"
 tls_mode: "acme_dns"
 
 # ACME DNS-01 provider name for lego (required when tls_mode=acme_dns).
-# Credentials: put the provider's lego keys (for example PORKBUN_API_KEY and
-# PORKBUN_SECRET_API_KEY) in /etc/qops/secrets.env. The traefik role copies only
-# that provider's keys into /etc/qops/traefik-acme.env (0600) and regenerates that
-# file on every run, so hand-written entries there do not survive. Providers
-# outside the built-in list also need traefik_acme_env_keys. Traefik must not
-# EnvironmentFile /etc/qops/secrets.env.
 tls_acme_dns_provider: ""
+
+# Lego environment variables for that provider (for example PORKBUN_API_KEY and
+# PORKBUN_SECRET_API_KEY). This is a secret: set it in the host's age-encrypted
+# ansible/inventory/host_vars/<host>/secrets.sops.yml, never here. The traefik
+# role writes exactly these keys to /etc/qops/traefik-acme.env (0600) and rejects
+# keys the provider does not use; providers outside the built-in table also need
+# traefik_acme_env_keys. Traefik never reads /etc/qops/secrets.env.
+tls_acme_dns_credentials: {}
 
 # ACME account email. Empty falls back to e2b_admin_email.
 tls_acme_email: ""

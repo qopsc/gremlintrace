@@ -1166,58 +1166,99 @@ PY
   unit="$(render_with_defaults ansible/roles/traefik/templates/traefik.service.j2 '{}')"
   [[ "${unit}" == *traefik-acme.env* ]]
   ! printf '%s\n' "${unit}" | grep -q '^EnvironmentFile=.*secrets.env'
-  script="${REPO_ROOT}/ansible/roles/traefik/files/install-traefik-acme-env.sh"
-  secrets="${BATS_TMPDIR}/full-secrets.env"
-  dest="${BATS_TMPDIR}/traefik-acme.env"
-  cat >"${secrets}" <<'EOF'
-E2B_API_KEY=e2b_0123456789abcdef0123456789abcdef01234567
-E2B_POSTGRES_PASSWORD=pg-secret
-SANDBOX_ACCESS_TOKEN_HASH_SEED=hash-seed
-CF_DNS_API_TOKEN=cf-token
-AWS_ACCESS_KEY_ID=aws-id
-AWS_SECRET_ACCESS_KEY=aws-secret
-PORKBUN_API_KEY=porkbun-api-key
-PORKBUN_SECRET_API_KEY=porkbun-secret-key
-UNRELATED_SECRET=do-not-copy
-EOF
-  run bash "${script}" "${secrets}" "${dest}" cloudflare
-  [ "$status" -eq 0 ]
-  grep -q 'CF_DNS_API_TOKEN=cf-token' "${dest}"
-  ! grep -q 'AWS_' "${dest}"
-  ! grep -q 'UNRELATED_SECRET' "${dest}"
-  ! grep -q 'E2B_API_KEY' "${dest}"
-  ! grep -q 'E2B_POSTGRES_PASSWORD' "${dest}"
-  ! grep -q 'SANDBOX_ACCESS_TOKEN_HASH_SEED' "${dest}"
-
-  route53_dest="${BATS_TMPDIR}/traefik-route53.env"
-  run bash "${script}" "${secrets}" "${route53_dest}" route53
-  [ "$status" -eq 0 ]
-  grep -q 'AWS_ACCESS_KEY_ID=aws-id' "${route53_dest}"
-  grep -q 'AWS_SECRET_ACCESS_KEY=aws-secret' "${route53_dest}"
-  ! grep -q 'CF_DNS_API_TOKEN' "${route53_dest}"
-
-  porkbun_dest="${BATS_TMPDIR}/traefik-porkbun.env"
-  run bash "${script}" "${secrets}" "${porkbun_dest}" porkbun
-  [ "$status" -eq 0 ]
-  grep -q 'PORKBUN_API_KEY=porkbun-api-key' "${porkbun_dest}"
-  grep -q 'PORKBUN_SECRET_API_KEY=porkbun-secret-key' "${porkbun_dest}"
-  ! grep -q 'CF_DNS_API_TOKEN' "${porkbun_dest}"
-  ! grep -q 'AWS_' "${porkbun_dest}"
 }
 
-@test "ACME env installer rejects a provider with no credentials in the secrets file" {
-  script="${REPO_ROOT}/ansible/roles/traefik/files/install-traefik-acme-env.sh"
-  secrets="${BATS_TMPDIR}/credential-free-secrets.env"
-  dest="${BATS_TMPDIR}/traefik-nothing.env"
-  cat >"${secrets}" <<'EOF'
-E2B_API_KEY=e2b_0123456789abcdef0123456789abcdef01234567
-UNRELATED_SECRET=do-not-copy
-EOF
-  rm -f "${dest}"
-  run bash "${script}" "${secrets}" "${dest}" porkbun
+# Credentials arrive as a JSON object on stdin (from tls_acme_dns_credentials,
+# decrypted on the controller by community.sops). Nothing is read from
+# /etc/qops/secrets.env and no value ever appears on argv.
+acme_script="ansible/roles/traefik/files/install-traefik-acme-env.sh"
+
+@test "ACME env installer writes only the provider's keys from stdin credentials" {
+  script="${REPO_ROOT}/${acme_script}"
+  dest="${BATS_TMPDIR}/acme-stdin/traefik-acme.env"
+  rm -rf "$(dirname "${dest}")"
+  run bash -c 'printf "%s" "$1" | bash "$2" "$3" porkbun' _ \
+    '{"PORKBUN_API_KEY":"porkbun-api-key","PORKBUN_SECRET_API_KEY":"porkbun-secret-key"}' \
+    "${script}" "${dest}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "installed" ]
+  [ "$(stat -f '%Lp' "${dest}" 2>/dev/null || stat -c '%a' "${dest}")" = "600" ]
+  grep -q '^PORKBUN_API_KEY=porkbun-api-key$' "${dest}"
+  grep -q '^PORKBUN_SECRET_API_KEY=porkbun-secret-key$' "${dest}"
+  [ "$(wc -l <"${dest}" | tr -d ' ')" = "2" ]
+}
+
+@test "ACME env installer reports unchanged when the credentials did not change" {
+  script="${REPO_ROOT}/${acme_script}"
+  dest="${BATS_TMPDIR}/acme-idem/traefik-acme.env"
+  rm -rf "$(dirname "${dest}")"
+  printf '%s' '{"CF_DNS_API_TOKEN":"cf-token"}' | bash "${script}" "${dest}" cloudflare >/dev/null
+  run bash -c 'printf "%s" "$1" | bash "$2" "$3" cloudflare' _ '{"CF_DNS_API_TOKEN":"cf-token"}' "${script}" "${dest}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unchanged" ]
+  run bash -c 'printf "%s" "$1" | bash "$2" "$3" cloudflare' _ '{"CF_DNS_API_TOKEN":"rotated"}' "${script}" "${dest}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "installed" ]
+  grep -q '^CF_DNS_API_TOKEN=rotated$' "${dest}"
+}
+
+@test "ACME env installer rejects keys the provider does not use and never echoes values" {
+  script="${REPO_ROOT}/${acme_script}"
+  dest="${BATS_TMPDIR}/acme-badkey/traefik-acme.env"
+  rm -rf "$(dirname "${dest}")"
+  run bash -c 'printf "%s" "$1" | bash "$2" "$3" porkbun' _ \
+    '{"PORKBUN_API_KEY":"pk","E2B_API_KEY":"e2b_leaked_value"}' "${script}" "${dest}"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"E2B_API_KEY"* ]]
+  [[ "${output}" == *"porkbun"* ]]
+  [[ "${output}" == *"PORKBUN_SECRET_API_KEY"* ]]
+  [[ "${output}" != *"e2b_leaked_value"* ]]
+  [ ! -e "${dest}" ]
+  # extra keys for providers outside the built-in table are allowed explicitly
+  run bash -c 'printf "%s" "$1" | bash "$2" "$3" exoticdns MY_DNS_TOKEN' _ \
+    '{"MY_DNS_TOKEN":"tok"}' "${script}" "${dest}"
+  [ "$status" -eq 0 ]
+  grep -q '^MY_DNS_TOKEN=tok$' "${dest}"
+}
+
+@test "ACME env installer rejects empty credentials with a message naming the expected keys" {
+  script="${REPO_ROOT}/${acme_script}"
+  dest="${BATS_TMPDIR}/acme-empty/traefik-acme.env"
+  rm -rf "$(dirname "${dest}")"
+  run bash -c 'printf "%s" "$1" | bash "$2" "$3" porkbun' _ '{}' "${script}" "${dest}"
   [ "$status" -ne 0 ]
   [[ "${output}" == *"no ACME DNS credentials for provider 'porkbun'"* ]]
+  [[ "${output}" == *"tls_acme_dns_credentials"* ]]
   [ ! -e "${dest}" ]
+}
+
+@test "traefik role feeds tls_acme_dns_credentials to the installer on stdin after a readable assert" {
+  run python3 - "${REPO_ROOT}/ansible/roles/traefik/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = [t.get("name", "") for t in tasks]
+cmd_idx = next(i for i, t in enumerate(tasks)
+               if "install-traefik-acme-env.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", "")))
+task = tasks[cmd_idx]
+cmd = task["ansible.builtin.command"]
+assert "secrets_file" not in cmd["cmd"] and "secrets.env" not in cmd["cmd"], cmd["cmd"]
+assert "tls_acme_dns_credentials" in str(cmd.get("stdin", "")), "credentials must go in on stdin"
+assert task.get("no_log") is True
+assert task.get("notify") in ("Restart traefik", ["Restart traefik"]), "credential change must restart traefik"
+assert "unchanged" not in str(task.get("changed_when")) or "installed" in str(task.get("changed_when"))
+# A non-secret assert before the command gives the operator a readable failure
+# (the command itself is no_log).
+asserts = [i for i, t in enumerate(tasks[:cmd_idx])
+           if "ansible.builtin.assert" in t and "tls_acme_dns_credentials" in str(t["ansible.builtin.assert"])]
+assert asserts, "no readable assert on tls_acme_dns_credentials before the no_log command"
+fail_msg = str(tasks[asserts[-1]]["ansible.builtin.assert"].get("fail_msg", ""))
+assert "sops" in fail_msg.lower() and "tls_acme_dns_provider" in fail_msg, fail_msg
+assert "{{ tls_acme_dns_credentials" not in fail_msg, "fail_msg must not print credential values"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }
 
 @test "rendered e2b-api router has no buffering middleware" {

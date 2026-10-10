@@ -36,7 +36,7 @@ assert).
 
 | `tls_mode` | Behaviour |
 |---|---|
-| `acme_dns` | Built-in lego DNS-01. Only credentials for the configured `tls_acme_dns_provider` (plus explicit `traefik_acme_env_keys`) are copied to `/etc/qops/traefik-acme.env` (0600, root) — **not** the whole `/etc/qops/secrets.env`. |
+| `acme_dns` | Built-in lego DNS-01. `tls_acme_dns_credentials` (a mapping of the provider's lego env vars, kept in the host's sops-encrypted host_vars) is written to `/etc/qops/traefik-acme.env` (0600, root). Keys the configured `tls_acme_dns_provider` does not use are rejected unless listed in `traefik_acme_env_keys`; `/etc/qops/secrets.env` is never read. A readable assert runs before the `no_log` install step; a credential change restarts Traefik. |
 | `provided` | Source cert/key are stat'd, then installed as Traefik-owned copies under `/var/lib/traefik/tls/` and checked readable as the Traefik user. |
 | `internal_ca` | **Fails explicitly** (M2) |
 
