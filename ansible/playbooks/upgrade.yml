@@ -11,6 +11,8 @@
   pre_tasks:
     - name: Load documented defaults without overriding inventory
       ansible.builtin.include_tasks: ../tasks/load-defaults.yml
+      tags:
+        - always
     - name: Verify operator and pin variables resolve from vars_files
       ansible.builtin.assert:
         that:

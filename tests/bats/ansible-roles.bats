@@ -617,3 +617,75 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
+
+@test "e2b_host activates the swapfile with swapon, not a swap mount" {
+  run python3 - "${REPO_ROOT}/ansible/roles/e2b_host/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = [t.get("name", "") for t in tasks]
+mounts = [t for t in tasks if "ansible.posix.mount" in t and t["ansible.posix.mount"].get("fstype") == "swap"]
+assert mounts, "no fstab entry task for the swapfile"
+for t in mounts:
+    # ansible.posix.mount never runs swapon: state=mounted on fstype=swap
+    # executes `mount none` and fails on a real host.
+    assert t["ansible.posix.mount"]["state"] == "present", t["name"]
+swapon = [t for t in tasks if "swapon" in str(t.get("ansible.builtin.command", ""))]
+assert len(swapon) == 1, "expected exactly one swapon task"
+task = swapon[0]
+assert "when" in task, "swapon must be guarded so re-runs stay idempotent"
+assert "proc_swaps" in str(task["when"]), task["when"]
+assert names.index(mounts[0]["name"]) < names.index(task["name"])
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "common creates the journald drop-in directory before templating into it" {
+  run python3 - "${REPO_ROOT}/ansible/roles/common/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = [t.get("name", "") for t in tasks]
+deploy = next(i for i, t in enumerate(tasks)
+              if str(t.get("ansible.builtin.template", {}).get("dest", "")).startswith("/etc/systemd/journald.conf.d/"))
+dirs = [i for i, t in enumerate(tasks)
+        if t.get("ansible.builtin.file", {}).get("path") == "/etc/systemd/journald.conf.d"
+        and t["ansible.builtin.file"].get("state") == "directory"]
+assert dirs, "no task creates /etc/systemd/journald.conf.d (noble does not ship it)"
+assert dirs[0] < deploy, "directory task must precede the template task"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "every playbook loads documented defaults under tags: always" {
+  # group_vars/all.yml is not adjacent to the inventory or playbook dir, so it
+  # only arrives through this include. An untagged include is skipped by
+  # --tags <role>, leaving every role variable undefined.
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+bad = []
+seen = 0
+for pb in sorted((root / "ansible/playbooks").glob("*.yml")):
+    for play in yaml.safe_load(pb.read_text()):
+        for task in play.get("pre_tasks", []) or []:
+            if "load-defaults" in str(task.get("ansible.builtin.include_tasks", "")):
+                seen += 1
+                tags = task.get("tags", [])
+                if isinstance(tags, str):
+                    tags = [tags]
+                if "always" not in tags:
+                    bad.append(f"{pb.name}: {task.get('name')}")
+assert seen >= 7, f"expected load-defaults in every playbook, found {seen}"
+if bad:
+    print("load-defaults include not tagged always:")
+    for b in bad:
+        print("  " + b)
+    raise SystemExit(1)
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
