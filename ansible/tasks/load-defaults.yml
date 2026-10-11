@@ -2,15 +2,33 @@
 # Keep operator defaults overridable by inventory and extra vars. Play-level
 # vars_files have higher precedence than inventory, so defaults are loaded
 # privately and promoted one key at a time only when no value already exists.
+#
+# set_fact renders each value when it is promoted, and facts set by one loop
+# item are not visible to later items of the same task, so defaults that
+# reference other defaults (qops_derived_defaults) are promoted in a second
+# pass after the plain keys exist.
 - name: Load documented operator defaults
   ansible.builtin.include_vars:
     file: "{{ playbook_dir }}/../group_vars/all.yml"
     name: qops_documented_defaults
 
+- name: Name the defaults that are derived from other defaults
+  ansible.builtin.set_fact:
+    qops_derived_defaults:
+      - kodus_hairpin_hosts
+
 - name: Apply documented defaults only when unset
   ansible.builtin.set_fact:
     "{{ item.key }}": "{{ item.value }}"
-  loop: "{{ qops_documented_defaults | dict2items }}"
+  loop: "{{ qops_documented_defaults | dict2items | rejectattr('key', 'in', qops_derived_defaults) | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: query('ansible.builtin.varnames', '^' ~ item.key ~ '$') | length == 0
+
+- name: Apply derived defaults only when unset
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ qops_documented_defaults | dict2items | selectattr('key', 'in', qops_derived_defaults) | list }}"
   loop_control:
     label: "{{ item.key }}"
   when: query('ansible.builtin.varnames', '^' ~ item.key ~ '$') | length == 0

@@ -127,3 +127,14 @@ PY
   grep -q '^kodus_openai_api_key:' "${example}"
   grep -q '^kodus_license_key:' "${example}"
 }
+
+@test "documented defaults that derive from other defaults resolve through load-defaults" {
+  # kodus_hairpin_hosts is built from qops_domain; set_fact renders each
+  # value when promoted, so derived keys must be promoted after plain ones.
+  run ansible-playbook --check -i "${INVENTORY}" "${DOCTOR_PLAYBOOK}" \
+    --extra-vars "ansible_become=false" --extra-vars "qops_domain=unit.test"
+  echo "${output}" | tail -20
+  [[ "$output" != *"is undefined"* ]]
+  [[ "$output" == *"Apply derived defaults only when unset"* ]]
+  [[ "$output" == *"kodus_hairpin_hosts"* ]]
+}
