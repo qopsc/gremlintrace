@@ -51,6 +51,10 @@
   register: e2b_templates_pack_tmp
   delegate_to: localhost
   become: false
+  # Inventory ansible_become (e.g. ci/matrix/inventory-localhost.yml) overrides
+  # the become keyword; a task var outranks inventory so these stay unprivileged.
+  vars:
+    ansible_become: false
   changed_when: false
   tags:
     - e2b_templates
@@ -60,6 +64,10 @@
     cmd: pack-template-sources.sh {{ e2b_templates_controller_src_dir }} {{ e2b_templates_pack_tmp.path }}
   delegate_to: localhost
   become: false
+  # Inventory ansible_become (e.g. ci/matrix/inventory-localhost.yml) overrides
+  # the become keyword; a task var outranks inventory so these stay unprivileged.
+  vars:
+    ansible_become: false
   changed_when: false
   tags:
     - e2b_templates
@@ -80,6 +88,10 @@
     state: absent
   delegate_to: localhost
   become: false
+  # Inventory ansible_become (e.g. ci/matrix/inventory-localhost.yml) overrides
+  # the become keyword; a task var outranks inventory so these stay unprivileged.
+  vars:
+    ansible_become: false
   changed_when: false
   tags:
     - e2b_templates

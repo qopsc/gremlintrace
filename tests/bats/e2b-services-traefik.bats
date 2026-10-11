@@ -1709,3 +1709,19 @@ PY
   seed="${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-seed-if-needed.sh"
   ! grep -Eq 'e2b-set-secret\.sh" "\$\{SECRETS_FILE\}" E2B_API_KEY "\$\{key\}"' "${seed}"
 }
+
+@test "controller-delegated template tasks pin ansible_become=false against inventory become" {
+  run python3 - "${REPO_ROOT}/ansible/roles/e2b_templates/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+delegated = [t for t in tasks if t.get("delegate_to") == "localhost"]
+assert len(delegated) >= 3, [t["name"] for t in delegated]
+for t in delegated:
+    # Inventory ansible_become (ci/matrix/inventory-localhost.yml, or all: vars:)
+    # overrides the task keyword become: false; task vars outrank inventory.
+    assert t.get("vars", {}).get("ansible_become") is False, t["name"]
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
