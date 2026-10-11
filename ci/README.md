@@ -181,6 +181,8 @@ summary line via `ci/matrix/step-summary.sh`.
 |---|---|
 | `stage-artifacts.sh` | Build E2B dist (`e2b/build/build.sh`) + mirror FC artifacts locally |
 | `prepare-host.sh` | TLS (provided), wildcard DNS (`wildcard-dns.py` for `*.e2b.<domain>` / `*.<domain>`), `10.255.0.1` on lo, dummy `:80` until Traefik, KVM/nbd modules |
+
+**Known open (deferred):** `wildcard-dns.py` forwards in-zone queries whose type is not A/ANY (for example the AAAA half of `getent ahosts`) to the upstream resolver, which answers NXDOMAIN for the CI zone; systemd-resolved caches NXDOMAIN per name, so a following A lookup can fail until the negative TTL expires. Fix: answer NOERROR with an empty answer section for in-zone non-A types and forward only out-of-zone names. See `docs/audits/2026-09-09-pr9-review.md`.
 | `run-bootstrap.sh --playbook site` | Full M1 install on localhost |
 | `run-bootstrap.sh --playbook doctor` | `qops-doctor` including E2B smoke + isolation probe |
 | `kodus-smoke.sh` | Loopback health + `synthetic-github-webhook.sh` |
