@@ -73,10 +73,10 @@
       -f {{ e2b_datastores_compose_file }}
       up -d --wait
   register: e2b_datastores_compose_up
+  # compose prints its Created/Started/Recreated progress on stderr.
   changed_when: >-
-    'Created' in e2b_datastores_compose_up.stdout or
-    'Started' in e2b_datastores_compose_up.stdout or
-    'Recreated' in e2b_datastores_compose_up.stdout
+    (e2b_datastores_compose_up.stdout ~ e2b_datastores_compose_up.stderr)
+    is search('Created|Started|Recreated')
   tags:
     - e2b_datastores
 
