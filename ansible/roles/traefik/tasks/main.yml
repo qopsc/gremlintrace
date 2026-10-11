@@ -36,7 +36,9 @@
 
 - name: Require certificate files when tls_mode is provided
   ansible.builtin.command:
-    cmd: /usr/local/lib/qops/check-provided-tls.sh {{ tls_cert_path }} {{ tls_key_path }}
+    cmd: >-
+      /usr/local/lib/qops/check-provided-tls.sh {{ tls_cert_path }} {{ tls_key_path }} -
+      {{ traefik_provided_tls_hostnames | join(',') }}
   when: tls_mode == "provided"
   changed_when: false
   tags:

@@ -57,3 +57,11 @@ traefik_cert_resolver: letsencrypt
 traefik_archive_name: "traefik_{{ traefik_version }}_linux_amd64.tar.gz"
 traefik_checksums_name: "traefik_{{ traefik_version }}_checksums.txt"
 traefik_release_base_url: "https://github.com/traefik/traefik/releases/download/{{ traefik_version }}"
+# Every hostname Traefik routes; a provided certificate must cover all of them
+# (qops-tls-check stands in for the *.e2b.<d> sandbox wildcard).
+traefik_provided_tls_hostnames:
+  - "api.e2b.{{ qops_domain }}"
+  - "qops-tls-check.e2b.{{ qops_domain }}"
+  - "kodus.{{ qops_domain }}"
+  - "kodus-api.{{ qops_domain }}"
+  - "kodus-webhooks.{{ qops_domain }}"
