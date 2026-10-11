@@ -137,22 +137,22 @@ PY
 }
 
 @test "referenced build is never deleted" {
-  make_dir live-build $((NOW - 1000000))
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 52db5448-b890-5081-a224-3c27299b9985 $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query.sh"
   cat >"${qf}" <<EOF
 #!/usr/bin/env bash
-printf '%s\n' live-build __QOPS_E2B_GC_QUERY_OK__
+printf '%s\n' 52db5448-b890-5081-a224-3c27299b9985 __QOPS_E2B_GC_QUERY_OK__
 EOF
   chmod +x "${qf}"
   run run_gc "${GC}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ -d "${STORE}/live-build" ]
-  [ ! -d "${STORE}/old-unref" ]
+  [ -d "${STORE}/52db5448-b890-5081-a224-3c27299b9985" ]
+  [ ! -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
 }
 
 @test "referenced-build test fails if the keep_referenced guard is removed" {
-  make_dir live-build $((NOW - 1000000))
+  make_dir 52db5448-b890-5081-a224-3c27299b9985 $((NOW - 1000000))
   mutated="${BATS_TMPDIR}/gc-no-ref.py"
   disable_guard keep_referenced "${mutated}"
   qf="${BATS_TMPDIR}/query-ref.sh"
@@ -163,7 +163,7 @@ n="$(cat "${state_file}")"
 n="$((n + 1))"
 printf '%s\n' "${n}" >"${state_file}"
 if [[ "${n}" -eq 1 ]]; then
-  printf '%s\n' live-build __QOPS_E2B_GC_QUERY_OK__
+  printf '%s\n' 52db5448-b890-5081-a224-3c27299b9985 __QOPS_E2B_GC_QUERY_OK__
   exit 0
 fi
 printf '%s\n' __QOPS_E2B_GC_QUERY_OK__
@@ -173,11 +173,11 @@ EOF
   printf '0\n' >"${QOPS_GC_QUERY_STATE}"
   run run_gc "${mutated}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ ! -d "${STORE}/live-build" ]
+  [ ! -d "${STORE}/52db5448-b890-5081-a224-3c27299b9985" ]
 }
 
 @test "unreferenced build newer than retention is kept" {
-  make_dir fresh-unref $((NOW - 60))
+  make_dir dc8704ca-17a3-57d5-9b28-feb2c60e7392 $((NOW - 60))
   qf="${BATS_TMPDIR}/query-empty.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
@@ -186,11 +186,11 @@ EOF
   chmod +x "${qf}"
   run run_gc "${GC}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ -d "${STORE}/fresh-unref" ]
+  [ -d "${STORE}/dc8704ca-17a3-57d5-9b28-feb2c60e7392" ]
 }
 
-@test "fresh-unref test fails if the retention guard is removed" {
-  make_dir fresh-unref $((NOW - 60))
+@test "dc8704ca-17a3-57d5-9b28-feb2c60e7392 test fails if the retention guard is removed" {
+  make_dir dc8704ca-17a3-57d5-9b28-feb2c60e7392 $((NOW - 60))
   mutated="${BATS_TMPDIR}/gc-no-ret.py"
   disable_guard retention "${mutated}"
   qf="${BATS_TMPDIR}/query-empty2.sh"
@@ -201,11 +201,11 @@ EOF
   chmod +x "${qf}"
   run run_gc "${mutated}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ ! -d "${STORE}/fresh-unref" ]
+  [ ! -d "${STORE}/dc8704ca-17a3-57d5-9b28-feb2c60e7392" ]
 }
 
 @test "unreferenced build older than retention is removed" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-empty3.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
@@ -214,12 +214,12 @@ EOF
   chmod +x "${qf}"
   run run_gc "${GC}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ ! -d "${STORE}/old-unref" ]
+  [ ! -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
   [[ "$output" == *"reclaimed_bytes"* ]]
 }
 
 @test "database error deletes nothing and exits non-zero" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-fail.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
@@ -229,11 +229,11 @@ EOF
   chmod +x "${qf}"
   run run_gc "${GC}" --query-cmd "${qf}"
   [ "$status" -ne 0 ]
-  [ -d "${STORE}/old-unref" ]
+  [ -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
 }
 
 @test "database-error test fails if the fail_closed guard is removed" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   mutated="${BATS_TMPDIR}/gc-no-fail.py"
   disable_guard fail_closed "${mutated}"
   qf="${BATS_TMPDIR}/query-fail2.sh"
@@ -245,11 +245,11 @@ EOF
   chmod +x "${qf}"
   run run_gc "${mutated}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ ! -d "${STORE}/old-unref" ]
+  [ ! -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
 }
 
 @test "missing sentinel is treated as a database error" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-nosentinel.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
@@ -258,12 +258,12 @@ EOF
   chmod +x "${qf}"
   run run_gc "${GC}" --query-cmd "${qf}"
   [ "$status" -ne 0 ]
-  [ -d "${STORE}/old-unref" ]
+  [ -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
   [[ "$output" == *"sentinel"* || "$stderr" == *"sentinel"* ]]
 }
 
 @test "dry-run removes nothing" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-empty4.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
@@ -272,11 +272,11 @@ EOF
   chmod +x "${qf}"
   run run_gc "${GC}" --query-cmd "${qf}" --dry-run
   [ "$status" -eq 0 ]
-  [ -d "${STORE}/old-unref" ]
+  [ -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
 }
 
 @test "dry-run test fails if the dry_run guard is removed" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   mutated="${BATS_TMPDIR}/gc-no-dry.py"
   disable_guard dry_run "${mutated}"
   qf="${BATS_TMPDIR}/query-empty5.sh"
@@ -287,11 +287,11 @@ EOF
   chmod +x "${qf}"
   run run_gc "${mutated}" --query-cmd "${qf}" --dry-run
   [ "$status" -eq 0 ]
-  [ ! -d "${STORE}/old-unref" ]
+  [ ! -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
 }
 
 @test "create-during-run race is kept" {
-  make_dir raced $((NOW - 1000000))
+  make_dir a8c8154b-9187-5fde-8c94-ea73065ba2e6 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-race.sh"
   state="${BATS_TMPDIR}/race.state"
   printf '0\n' >"${state}"
@@ -304,16 +304,16 @@ if [[ "\$n" -eq 1 ]]; then
   printf '%s\n' __QOPS_E2B_GC_QUERY_OK__
   exit 0
 fi
-printf '%s\n' raced __QOPS_E2B_GC_QUERY_OK__
+printf '%s\n' a8c8154b-9187-5fde-8c94-ea73065ba2e6 __QOPS_E2B_GC_QUERY_OK__
 EOF
   chmod +x "${qf}"
   run run_gc "${GC}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ -d "${STORE}/raced" ]
+  [ -d "${STORE}/a8c8154b-9187-5fde-8c94-ea73065ba2e6" ]
 }
 
 @test "race test fails if the race_requery guard is removed" {
-  make_dir raced $((NOW - 1000000))
+  make_dir a8c8154b-9187-5fde-8c94-ea73065ba2e6 $((NOW - 1000000))
   mutated="${BATS_TMPDIR}/gc-no-race.py"
   disable_guard race_requery "${mutated}"
   qf="${BATS_TMPDIR}/query-race2.sh"
@@ -328,16 +328,16 @@ if [[ "\$n" -eq 1 ]]; then
   printf '%s\n' __QOPS_E2B_GC_QUERY_OK__
   exit 0
 fi
-printf '%s\n' raced __QOPS_E2B_GC_QUERY_OK__
+printf '%s\n' a8c8154b-9187-5fde-8c94-ea73065ba2e6 __QOPS_E2B_GC_QUERY_OK__
 EOF
   chmod +x "${qf}"
   run run_gc "${mutated}" --query-cmd "${qf}"
   [ "$status" -eq 0 ]
-  [ ! -d "${STORE}/raced" ]
+  [ ! -d "${STORE}/a8c8154b-9187-5fde-8c94-ea73065ba2e6" ]
 }
 
 @test "missing lock-cmd deletes nothing and exits non-zero" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-empty-lock.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
@@ -352,12 +352,12 @@ EOF
     --summary-path "${BATS_TMPDIR}/missing-summary.json" \
     --query-cmd "${qf}"
   [ "$status" -ne 0 ]
-  [ -d "${STORE}/old-unref" ]
+  [ -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
   [[ "$output" == *"lock-cmd"* || "$stderr" == *"lock-cmd"* ]]
 }
 
 @test "failed lock-cmd deletes nothing and exits non-zero" {
-  make_dir old-unref $((NOW - 1000000))
+  make_dir 3143fc8b-36fb-5fee-87de-317627c48223 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-empty-lockfail.sh"
   cat >"${qf}" <<'EOF'
 #!/usr/bin/env bash
@@ -373,18 +373,18 @@ EOF
   chmod +x "${fail_lock}"
   run run_gc "${GC}" --query-cmd "${qf}" --lock-cmd "${fail_lock}"
   [ "$status" -ne 0 ]
-  [ -d "${STORE}/old-unref" ]
+  [ -d "${STORE}/3143fc8b-36fb-5fee-87de-317627c48223" ]
 }
 
 @test "insert after last query and before delete is kept" {
-  make_dir raced $((NOW - 1000000))
+  make_dir a8c8154b-9187-5fde-8c94-ea73065ba2e6 $((NOW - 1000000))
   qf="${BATS_TMPDIR}/query-post.sh"
   inserted="${BATS_TMPDIR}/inserted-after-query"
   rm -f "${inserted}"
   cat >"${qf}" <<EOF
 #!/usr/bin/env bash
 if [[ -f "${inserted}" ]]; then
-  printf '%s\n' raced __QOPS_E2B_GC_QUERY_OK__
+  printf '%s\n' a8c8154b-9187-5fde-8c94-ea73065ba2e6 __QOPS_E2B_GC_QUERY_OK__
   exit 0
 fi
 printf '%s\n' __QOPS_E2B_GC_QUERY_OK__
@@ -394,11 +394,11 @@ EOF
   run run_gc "${GC}" --query-cmd "${qf}"
   unset QOPS_E2B_GC_INJECT_BEFORE_DELETE
   [ "$status" -eq 0 ]
-  [ -d "${STORE}/raced" ]
+  [ -d "${STORE}/a8c8154b-9187-5fde-8c94-ea73065ba2e6" ]
 }
 
 @test "post-query insert test fails if the final re-query guard is removed" {
-  make_dir raced $((NOW - 1000000))
+  make_dir a8c8154b-9187-5fde-8c94-ea73065ba2e6 $((NOW - 1000000))
   mutated="${BATS_TMPDIR}/gc-no-final.py"
   disable_guard race_lock_final_query "${mutated}"
   qf="${BATS_TMPDIR}/query-post2.sh"
@@ -407,7 +407,7 @@ EOF
   cat >"${qf}" <<EOF
 #!/usr/bin/env bash
 if [[ -f "${inserted}" ]]; then
-  printf '%s\n' raced __QOPS_E2B_GC_QUERY_OK__
+  printf '%s\n' a8c8154b-9187-5fde-8c94-ea73065ba2e6 __QOPS_E2B_GC_QUERY_OK__
   exit 0
 fi
 printf '%s\n' __QOPS_E2B_GC_QUERY_OK__
@@ -417,7 +417,7 @@ EOF
   run run_gc "${mutated}" --query-cmd "${qf}"
   unset QOPS_E2B_GC_INJECT_BEFORE_DELETE
   [ "$status" -eq 0 ]
-  [ ! -d "${STORE}/raced" ]
+  [ ! -d "${STORE}/a8c8154b-9187-5fde-8c94-ea73065ba2e6" ]
 }
 
 # Property: a concurrent inserter blocked on the same lockfile cannot observe
@@ -425,7 +425,7 @@ EOF
 # has finished (directory is gone). If GC releases the lock before rmtree, the
 # inserter succeeds while the directory still exists and this test fails.
 setup_lock_spans_rmtree() {
-  make_dir raced $((NOW - 1000000))
+  make_dir a8c8154b-9187-5fde-8c94-ea73065ba2e6 $((NOW - 1000000))
   lockfile="${BATS_TMPDIR}/gc.lock"
   lock_held="${BATS_TMPDIR}/lock.held"
   rmtree_started="${BATS_TMPDIR}/rmtree.started"
@@ -460,7 +460,7 @@ from pathlib import Path
 
 with open("${lockfile}", "w", encoding="utf-8") as handle:
     fcntl.flock(handle, fcntl.LOCK_EX)
-    if Path("${STORE}/raced").is_dir():
+    if Path("${STORE}/a8c8154b-9187-5fde-8c94-ea73065ba2e6").is_dir():
         Path("${insert_result}").write_text("INSERTED_WHILE_DIR_EXISTS\n", encoding="utf-8")
     else:
         Path("${insert_result}").write_text("DIR_GONE\n", encoding="utf-8")
@@ -499,7 +499,7 @@ EOF
   gc_status=$?
   wait "${ins_pid}"
   [ "${gc_status}" -eq 0 ]
-  [ ! -d "${STORE}/raced" ]
+  [ ! -d "${STORE}/a8c8154b-9187-5fde-8c94-ea73065ba2e6" ]
   [ -f "${insert_result}" ]
   [[ "$(cat "${insert_result}")" == "DIR_GONE" ]]
 }
@@ -524,11 +524,11 @@ EOF
 }
 
 @test "all live build references protect dirs; snapshots.id does not" {
-  make_dir snap-row-uuid $((NOW - 1000000))
-  make_dir live-build-id $((NOW - 1000000))
-  make_dir historical-live-build $((NOW - 1000000))
-  make_dir snapshot-template-build $((NOW - 1000000))
-  make_dir dead-build-id $((NOW - 1000000))
+  make_dir 03910c0a-346b-533d-8a24-78193ab76e1e $((NOW - 1000000))
+  make_dir 00e6cfac-64d4-5795-8792-2861b5ef6069 $((NOW - 1000000))
+  make_dir 4c985813-9d69-5ed6-9d15-0f432104851d $((NOW - 1000000))
+  make_dir a5551526-2b97-5216-a12a-da17724e591d $((NOW - 1000000))
+  make_dir ecd4411e-603d-5005-bc6b-f02395ce03ce $((NOW - 1000000))
   db="${BATS_TMPDIR}/gc-schema.sqlite"
   rm -f "${db}"
   python3 - "${db}" <<'PY'
@@ -541,12 +541,12 @@ CREATE TABLE snapshot_templates (env_id TEXT PRIMARY KEY, build_id TEXT);
 CREATE TABLE env_builds (id TEXT PRIMARY KEY, env_id TEXT);
 CREATE TABLE env_build_assignments (env_id TEXT, build_id TEXT);
 INSERT INTO envs (id, deleted_at) VALUES ('tmpl-live', NULL), ('snap-env', NULL), ('tmpl-dead', '2020-01-01');
-INSERT INTO snapshots (id, env_id, base_env_id) VALUES ('snap-row-uuid', 'snap-env', 'tmpl-live');
-INSERT INTO snapshot_templates (env_id, build_id) VALUES ('snap-env', 'snapshot-template-build');
-INSERT INTO env_builds (id, env_id) VALUES ('live-build-id', 'tmpl-live'), ('historical-live-build', 'tmpl-live'), ('dead-build-id', 'tmpl-dead');
-INSERT INTO env_build_assignments (env_id, build_id) VALUES ('tmpl-live', 'live-build-id');
-INSERT INTO env_build_assignments (env_id, build_id) VALUES ('snap-env', 'live-build-id');
-INSERT INTO env_build_assignments (env_id, build_id) VALUES ('tmpl-dead', 'dead-build-id');
+INSERT INTO snapshots (id, env_id, base_env_id) VALUES ('03910c0a-346b-533d-8a24-78193ab76e1e', 'snap-env', 'tmpl-live');
+INSERT INTO snapshot_templates (env_id, build_id) VALUES ('snap-env', 'a5551526-2b97-5216-a12a-da17724e591d');
+INSERT INTO env_builds (id, env_id) VALUES ('00e6cfac-64d4-5795-8792-2861b5ef6069', 'tmpl-live'), ('4c985813-9d69-5ed6-9d15-0f432104851d', 'tmpl-live'), ('ecd4411e-603d-5005-bc6b-f02395ce03ce', 'tmpl-dead');
+INSERT INTO env_build_assignments (env_id, build_id) VALUES ('tmpl-live', '00e6cfac-64d4-5795-8792-2861b5ef6069');
+INSERT INTO env_build_assignments (env_id, build_id) VALUES ('snap-env', '00e6cfac-64d4-5795-8792-2861b5ef6069');
+INSERT INTO env_build_assignments (env_id, build_id) VALUES ('tmpl-dead', 'ecd4411e-603d-5005-bc6b-f02395ce03ce');
 """)
 conn.commit()
 PY
@@ -556,21 +556,21 @@ PY
   ! grep -E 'SELECT[[:space:]]+id::text[[:space:]]+FROM[[:space:]]+snapshots' "${QUERY_SH}"
   run run_gc "${GC}" --query-cmd "${QUERY_SH} python3 ${FAKE_PSQL} x x x x x"
   [ "$status" -eq 0 ]
-  [ -d "${STORE}/live-build-id" ]
-  [ -d "${STORE}/historical-live-build" ]
-  [ -d "${STORE}/snapshot-template-build" ]
-  [ ! -d "${STORE}/dead-build-id" ]
-  [ ! -d "${STORE}/snap-row-uuid" ]
+  [ -d "${STORE}/00e6cfac-64d4-5795-8792-2861b5ef6069" ]
+  [ -d "${STORE}/4c985813-9d69-5ed6-9d15-0f432104851d" ]
+  [ -d "${STORE}/a5551526-2b97-5216-a12a-da17724e591d" ]
+  [ ! -d "${STORE}/ecd4411e-603d-5005-bc6b-f02395ce03ce" ]
+  [ ! -d "${STORE}/03910c0a-346b-533d-8a24-78193ab76e1e" ]
 }
 
 @test "schema fixture: database error still deletes nothing" {
-  make_dir live-build-id $((NOW - 1000000))
-  make_dir snap-row-uuid $((NOW - 1000000))
+  make_dir 00e6cfac-64d4-5795-8792-2861b5ef6069 $((NOW - 1000000))
+  make_dir 03910c0a-346b-533d-8a24-78193ab76e1e $((NOW - 1000000))
   export QOPS_GC_FIXTURE_DB="${BATS_TMPDIR}/missing-db.sqlite"
   run run_gc "${GC}" --query-cmd "${QUERY_SH} python3 ${FAKE_PSQL} x x x x x"
   [ "$status" -ne 0 ]
-  [ -d "${STORE}/live-build-id" ]
-  [ -d "${STORE}/snap-row-uuid" ]
+  [ -d "${STORE}/00e6cfac-64d4-5795-8792-2861b5ef6069" ]
+  [ -d "${STORE}/03910c0a-346b-533d-8a24-78193ab76e1e" ]
 }
 
 @test "query SQL does not treat snapshots.id as a storage key" {
@@ -586,4 +586,62 @@ PY
   grep -q 'snapshots' "${QUERY_SH}"
   grep -q 'snapshot_templates' "${QUERY_SH}"
   grep -q 'base_env_id' "${QUERY_SH}"
+}
+
+@test "directories that are not build ids are never deleted" {
+  make_dir cache $((NOW - 1000000))
+  make_dir "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d" $((NOW - 1000000))
+  qf="${BATS_TMPDIR}/query-nonbuild.sh"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" __QOPS_E2B_GC_QUERY_OK__\n' >"${qf}"
+  chmod +x "${qf}"
+  run run_gc "${GC}" --query-cmd "${qf}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [ -d "${STORE}/cache" ]
+  [ ! -d "${STORE}/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d" ]
+  [[ "$output" == *'"skipped_nonbuild": 1'* ]]
+}
+
+@test "the database lock is taken per candidate, not around the whole scan" {
+  make_dir "11111111-1111-4111-8111-111111111111" $((NOW - 1000000))
+  make_dir "22222222-2222-4222-8222-222222222222" $((NOW - 1000000))
+  evlog="${BATS_TMPDIR}/lock-events.log"
+  : >"${evlog}"
+  qf="${BATS_TMPDIR}/query-events.sh"
+  cat >"${qf}" <<EOF
+#!/usr/bin/env bash
+echo QUERY >>"${evlog}"
+printf '%s\n' __QOPS_E2B_GC_QUERY_OK__
+EOF
+  chmod +x "${qf}"
+  lock="${BATS_TMPDIR}/lock-events.sh"
+  cat >"${lock}" <<EOF
+#!/usr/bin/env bash
+echo LOCK >>"${evlog}"
+printf '%s\n' __QOPS_E2B_GC_LOCK_OK__
+cat >/dev/null
+echo UNLOCK >>"${evlog}"
+EOF
+  chmod +x "${lock}"
+  run run_gc "${GC}" --query-cmd "${qf}" --lock-cmd "${lock}"
+  echo "${output}"
+  cat "${evlog}"
+  [ "$status" -eq 0 ]
+  # the scan runs unlocked; each delete holds its own short lock
+  [ "$(head -n1 "${evlog}")" = "QUERY" ]
+  [ "$(grep -c '^LOCK$' "${evlog}")" = "2" ]
+  [ "$(grep -c '^UNLOCK$' "${evlog}")" = "2" ]
+  python3 - "${evlog}" <<'PY'
+import sys
+ev = [l.strip() for l in open(sys.argv[1])]
+depth = 0
+for e in ev:
+    if e == "LOCK":
+        depth += 1
+        assert depth == 1, "nested/overlapping locks"
+    elif e == "UNLOCK":
+        depth -= 1
+assert depth == 0
+print("ok")
+PY
 }

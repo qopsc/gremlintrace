@@ -212,7 +212,7 @@ sudo qops-e2b-gc --dry-run
 sudo qops-e2b-gc
 ```
 
-Deletes `<store>/<buildID>/` dirs not referenced as live `env_build_assignments.build_id` (assignments whose `env_id` is a live template or a live snapshot) and older than `e2b_snapshot_retention_hours` (default 168h). `snapshots.id` is a row UUID and is **not** a storage key. Prunes stale Local-registry `templateId:buildId` images. Holds `LOCK TABLE env_builds, env_build_assignments, snapshots IN SHARE ROW EXCLUSIVE MODE` across query-and-delete so INSERT waits. Fails closed if the DB query or lock is unreachable.
+Deletes `<store>/<buildID>/` dirs not referenced as live `env_build_assignments.build_id` (assignments whose `env_id` is a live template or a live snapshot) and older than `e2b_snapshot_retention_hours` (default 168h). `snapshots.id` is a row UUID and is **not** a storage key. Prunes stale Local-registry `templateId:buildId` images. Only uuid-named directories are candidates. For each candidate it holds `LOCK TABLE env_builds, env_build_assignments, snapshots, snapshot_templates IN SHARE ROW EXCLUSIVE MODE` across a re-query and that one `rmtree`, so E2B writes wait per directory rather than for the whole pass. Fails closed if the DB query or lock is unreachable.
 
 Header-chain walking (parent build IDs in on-disk headers) is an **unverified M1 limitation** — see `docs/spike-notes.md`. Live GC against Postgres is **unverified**.
 
