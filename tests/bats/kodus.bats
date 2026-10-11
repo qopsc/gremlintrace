@@ -882,3 +882,21 @@ assert "kodus_health_urls" in str(env.get("KODUS_HEALTH_URLS", "")), env
 print("ok")
 PY
 }
+
+@test "kodus rejects undecrypted sops values for the LLM and license keys" {
+  run python3 - "${REPO_ROOT}/ansible/roles/kodus/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = [t.get("name", "") for t in tasks]
+resolve = next(i for i, t in enumerate(tasks) if "kodus_openai_api_key_effective" in str(t.get("ansible.builtin.set_fact", "")))
+guards = [i for i, t in enumerate(tasks[:resolve])
+          if "ansible.builtin.assert" in t and "ENC" in str(t["ansible.builtin.assert"]["that"])
+          and "kodus_openai_api_key" in str(t["ansible.builtin.assert"]["that"])
+          and "kodus_license_key" in str(t["ansible.builtin.assert"]["that"])]
+assert guards, "no ENC[ guard before the keys are used"
+assert "{{ kodus_openai_api_key" not in str(tasks[guards[0]]["ansible.builtin.assert"].get("fail_msg", "")), "fail_msg must not print the key"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}

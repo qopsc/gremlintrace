@@ -119,6 +119,20 @@
   tags:
     - kodus
 
+# A value still reading ENC[...] means community.sops did not decrypt the
+# host_vars file; Kodus would otherwise start with a ciphertext as its API key.
+- name: Reject undecrypted sops values for the Kodus LLM and license keys
+  ansible.builtin.assert:
+    that:
+      - not (kodus_openai_api_key | default('') | string is match('ENC\\['))
+      - not (kodus_license_key | default('') | string is match('ENC\\['))
+    fail_msg: >-
+      kodus_openai_api_key or kodus_license_key still holds a sops ciphertext
+      (ENC[...]); the controller did not decrypt host_vars. Check SOPS_AGE_KEY_FILE
+      and that ansible.cfg enables the community.sops vars plugin; see docs/install.md.
+  tags:
+    - kodus
+
 - name: Resolve Kodus LLM and license keys
   ansible.builtin.set_fact:
     kodus_openai_api_key_effective: >-
