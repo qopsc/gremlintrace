@@ -59,6 +59,8 @@ treats the marker as `ForceStop=true` at shutdown-signal receipt. The marker is
 removed after a successful stop (and on the subsequent start path) so a later
 ordinary stop still drains. Live FORCE_STOP behaviour is **unverified**.
 
+Re-running `site.yml` with a changed orchestrator env or unit notifies `Restart e2b-orchestrator`, which is an ordinary stop: live sandboxes drain first (the unit's `TimeoutStopSec` outlives the upstream ceiling), so a config change on a busy host can take up to ~35 minutes to apply. Use `upgrade.yml` when a fast, force-stopped restart is wanted.
+
 `upgrade.yml` sets `e2b_services_seed_enabled=false`. The seeder is never invoked
 from that playbook.
 
