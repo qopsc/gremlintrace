@@ -278,13 +278,33 @@
     that:
       - tls_acme_dns_credentials is mapping
       - tls_acme_dns_credentials | length > 0
+      # A value still reading ENC[...] means community.sops did not decrypt the
+      # host_vars file (missing SOPS_AGE_KEY_FILE or vars plugin not enabled).
+      - tls_acme_dns_credentials.values() | list | map('string') | select('match', 'ENC\\[') | list | length == 0
     fail_msg: >-
       tls_mode=acme_dns with tls_acme_dns_provider={{ tls_acme_dns_provider }} needs
       tls_acme_dns_credentials, a mapping of the provider's lego environment
-      variables (for porkbun: PORKBUN_API_KEY and PORKBUN_SECRET_API_KEY).
+      variables (for porkbun: PORKBUN_API_KEY and PORKBUN_SECRET_API_KEY), with
+      decrypted values (an ENC[...] value means sops did not decrypt host_vars:
+      check SOPS_AGE_KEY_FILE and the community.sops vars plugin in ansible.cfg).
       Put it in the host's sops-encrypted host_vars
       (ansible/inventory/host_vars/<host>/secrets.sops.yml); see docs/install.md.
   when: tls_mode == "acme_dns"
+  tags:
+    - traefik
+
+# Key names are not secret; checking them in a visible task gives the operator
+# the rejected and allowed names, which the no_log install below cannot show.
+- name: Check ACME DNS credential key names against the lego provider
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/lib/qops/install-traefik-acme-env.sh
+      --check-keys
+      {{ tls_acme_dns_provider }}
+      '{{ traefik_acme_env_keys | join(',') }}'
+      '{{ tls_acme_dns_credentials.keys() | list | join(',') }}'
+  when: tls_mode == "acme_dns"
+  changed_when: false
   tags:
     - traefik
 

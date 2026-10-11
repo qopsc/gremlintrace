@@ -1238,7 +1238,8 @@ import sys, yaml
 tasks = yaml.safe_load(open(sys.argv[1]))
 names = [t.get("name", "") for t in tasks]
 cmd_idx = next(i for i, t in enumerate(tasks)
-               if "install-traefik-acme-env.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", "")))
+               if "install-traefik-acme-env.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", ""))
+               and "--check-keys" not in str(t["ansible.builtin.command"]["cmd"]))
 task = tasks[cmd_idx]
 cmd = task["ansible.builtin.command"]
 assert "secrets_file" not in cmd["cmd"] and "secrets.env" not in cmd["cmd"], cmd["cmd"]
@@ -1720,6 +1721,39 @@ for t in delegated:
     # Inventory ansible_become (ci/matrix/inventory-localhost.yml, or all: vars:)
     # overrides the task keyword become: false; task vars outrank inventory.
     assert t.get("vars", {}).get("ansible_become") is False, t["name"]
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "ACME installer can validate key names without values so the failure is readable" {
+  script="${REPO_ROOT}/ansible/roles/traefik/files/install-traefik-acme-env.sh"
+  run bash "${script}" --check-keys porkbun "" "PORKBUN_API_KEY,PORKBUN_SECRET_KEY"
+  echo "${output}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PORKBUN_SECRET_KEY"* ]]
+  [[ "$output" == *"PORKBUN_SECRET_API_KEY"* ]]
+  run bash "${script}" --check-keys porkbun "" "PORKBUN_API_KEY,PORKBUN_SECRET_API_KEY"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+  run bash "${script}" --check-keys exoticdns "MY_TOKEN" "MY_TOKEN"
+  [ "$status" -eq 0 ]
+  run python3 - "${REPO_ROOT}/ansible/roles/traefik/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+install = next(i for i, t in enumerate(tasks)
+               if "install-traefik-acme-env.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", ""))
+               and "--check-keys" not in str(t["ansible.builtin.command"]["cmd"]))
+check = [i for i, t in enumerate(tasks[:install])
+         if "--check-keys" in str(t.get("ansible.builtin.command", {}).get("cmd", ""))]
+assert check, "no readable key-name validation before the no_log install"
+t = tasks[check[0]]
+assert t.get("no_log") is not True, "key-name check must be visible"
+assert "keys()" in t["ansible.builtin.command"]["cmd"] or "| list" in t["ansible.builtin.command"]["cmd"], t["ansible.builtin.command"]["cmd"]
+asserts = [t for t in tasks[:install] if "ansible.builtin.assert" in t and "tls_acme_dns_credentials" in str(t["ansible.builtin.assert"])]
+blob = str(asserts[-1]["ansible.builtin.assert"]["that"])
+assert "ENC" in blob, "assert must reject undecrypted sops values (ENC[...])"
 print("ok")
 PY
   [ "$status" -eq 0 ]

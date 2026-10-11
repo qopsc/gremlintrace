@@ -10,22 +10,40 @@
 # is refused so an E2B/database secret can never land in Traefik's environment.
 # Values never appear on argv or in error output. Prints "installed" when the
 # file content changed and "unchanged" otherwise (Ansible changed_when).
+#
+#   install-traefik-acme-env.sh --check-keys PROVIDER EXTRA_KEYS KEY1,KEY2
+#
+# validates key names only (no values, nothing on stdin) and prints "ok" or a
+# readable list of the rejected names, so Ansible can run it without no_log
+# before the secret-carrying install.
 set -euo pipefail
 
-DEST="${1:?traefik ACME env path required}"
-PROVIDER="${2:?ACME DNS provider required}"
-EXTRA_KEYS="${3:-}"
-
-# The Python source arrives on stdin (heredoc), so the credentials pipe is
-# handed over on fd 3.
-exec 3<&0
-python3 - "${DEST}" "${PROVIDER}" "${EXTRA_KEYS}" <<'PY'
+MODE=install
+if [[ "${1:-}" == "--check-keys" ]]; then
+  MODE=check
+  shift
+  PROVIDER="${1:?ACME DNS provider required}"
+  EXTRA_KEYS="${2:-}"
+  KEY_LIST="${3:-}"
+  exec 3</dev/null
+  set -- "${KEY_LIST}" "${PROVIDER}" "${EXTRA_KEYS}"
+else
+  DEST="${1:?traefik ACME env path required}"
+  PROVIDER="${2:?ACME DNS provider required}"
+  EXTRA_KEYS="${3:-}"
+  # The Python source arrives on stdin (heredoc), so the credentials pipe is
+  # handed over on fd 3.
+  exec 3<&0
+  set -- "${DEST}" "${PROVIDER}" "${EXTRA_KEYS}"
+fi
+python3 - "${MODE}" "$@" <<'PY'
 import json
 import os
 import pathlib
 import sys
 import tempfile
 
+mode = sys.argv.pop(1)
 dest = pathlib.Path(sys.argv[1])
 
 PROVIDER_KEYS = {
@@ -76,11 +94,15 @@ if not keys:
         f"unsupported ACME DNS provider {provider!r}; configure traefik_acme_env_keys explicitly"
     )
 
-try:
-    with os.fdopen(3, "r", encoding="utf-8") as credentials_in:
-        credentials = json.load(credentials_in)
-except json.JSONDecodeError as exc:
-    raise SystemExit(f"tls_acme_dns_credentials is not a JSON object: {exc.msg}") from None
+if mode == "check":
+    # argv[1] is the comma-separated key names; values never reach this mode.
+    credentials = {k.strip(): "" for k in sys.argv[1].split(",") if k.strip()}
+else:
+    try:
+        with os.fdopen(3, "r", encoding="utf-8") as credentials_in:
+            credentials = json.load(credentials_in)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"tls_acme_dns_credentials is not a JSON object: {exc.msg}") from None
 if not isinstance(credentials, dict):
     raise SystemExit("tls_acme_dns_credentials must be a mapping of ENV_NAME to value")
 
@@ -97,6 +119,9 @@ if not credentials:
         f"no ACME DNS credentials for provider {provider!r}: set tls_acme_dns_credentials "
         f"(one or more of {expected}) in the host's sops-encrypted host_vars"
     )
+if mode == "check":
+    print("ok")
+    raise SystemExit(0)
 
 lines = []
 for key in sorted(credentials):
