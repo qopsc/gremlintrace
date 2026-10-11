@@ -81,7 +81,7 @@ install_key() {
     echo "durable API key file is missing after write: ${SEEDED_KEY_FILE}" >&2
     exit 1
   fi
-  "${SCRIPT_DIR}/e2b-set-secret.sh" "${SECRETS_FILE}" E2B_API_KEY "${key}" >/dev/null
+  printf '%s' "${key}" | "${SCRIPT_DIR}/e2b-set-secret.sh" "${SECRETS_FILE}" E2B_API_KEY >/dev/null
   local verified
   verified="$("${SCRIPT_DIR}/e2b-read-secret.sh" "${SECRETS_FILE}" E2B_API_KEY)"
   if [[ "${verified}" != "${key}" ]]; then

@@ -1691,3 +1691,21 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
+
+@test "e2b-set-secret takes the value on stdin so it never appears in process listings" {
+  script="${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-set-secret.sh"
+  f="${BATS_TMPDIR}/set-secret.env"
+  printf 'A=1\nE2B_API_KEY=\n' >"${f}"
+  run bash -c 'printf "%s" "$1" | bash "$2" "$3" E2B_API_KEY' _ 'e2b_fromstdin' "${script}" "${f}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  grep -q '^E2B_API_KEY=e2b_fromstdin$' "${f}"
+  grep -q '^A=1$' "${f}"
+  # an argv value is refused, not silently accepted
+  run bash "${script}" "${f}" E2B_API_KEY e2b_onargv
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"stdin"* ]]
+  ! grep -q 'e2b_onargv' "${f}"
+  seed="${REPO_ROOT}/ansible/roles/e2b_services/files/e2b-seed-if-needed.sh"
+  ! grep -Eq 'e2b-set-secret\.sh" "\$\{SECRETS_FILE\}" E2B_API_KEY "\$\{key\}"' "${seed}"
+}
