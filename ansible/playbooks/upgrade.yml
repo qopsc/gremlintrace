@@ -178,6 +178,12 @@
       tags:
         - upgrade
 
+    - name: Apply the Traefik pin and edge config
+      ansible.builtin.include_role:
+        name: traefik
+      tags:
+        - upgrade
+
     - name: Upgrade Kodus to the pinned IMAGE_TAG
       ansible.builtin.include_role:
         name: kodus

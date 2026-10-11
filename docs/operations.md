@@ -183,6 +183,9 @@ See `docs/install.md`. Summary:
 ```
 
 `upgrade.yml` runs `qops-backup`, `qops-backup-verify`, asserts `e2b-assert-dist-pair.sh`, compares pins via `e2b-compare-upgrade-pins.py`, rebuilds templates only when envd/kernel/Firecracker change.
+It also re-applies the `traefik` role, so a `traefik_version` bump takes effect.
+
+**No rollback in M1.** Kodus runs its database migrations on container start (`RUN_MIGRATIONS=true` upstream), so reverting `kodus_image_tag` does not revert schema, and `restore.yml` is an M2 placeholder. The only way back is the pre-upgrade bundle `upgrade.yml` took: stop the stack, restore the dumps by hand (next section), then re-run `site.yml` at the previous pins. Test the upgrade on a lab host first.
 
 ---
 
@@ -198,6 +201,26 @@ sudo qops-backup-verify /var/backups/qops/latest
 ```
 
 **Contents:** Kodus Postgres, E2B Postgres, Mongo archive, RabbitMQ definitions, `/etc/qops` tarball. Retention: `backup_retention_days` (default 7). Off-box `backup_target: s3|rsync` is M2.
+
+**Manual restore (unverified end to end; M1 has no `restore.yml`).** Run with the Kodus worker and E2B units stopped (`systemctl stop e2b-api e2b-client-proxy e2b-orchestrator`; `docker compose -f /opt/kodus-installer/docker-compose.yml stop worker api webhooks kodus-web`). `B=/var/backups/qops/latest`:
+
+```bash
+# Kodus Postgres (plain SQL dump; database name/user from /opt/kodus-installer/.env)
+gunzip -c "$B/kodus-postgres.sql.gz" | docker compose -f /opt/kodus-installer/docker-compose.yml \
+  exec -T db_kodus_postgres psql -U "$API_PG_DB_USERNAME" -d "$API_PG_DB_DATABASE"
+# E2B Postgres
+gunzip -c "$B/e2b-postgres.sql.gz" | docker compose --project-name e2b-data \
+  --env-file /etc/qops/secrets.env -f /etc/qops/e2b-data/docker-compose.yml \
+  exec -T postgres psql -U postgres -d e2b
+# Mongo (archive produced by mongodump --archive --gzip)
+docker compose -f /opt/kodus-installer/docker-compose.yml exec -T db_kodus_mongodb \
+  mongorestore --archive --gzip --drop --username "$API_MG_DB_USERNAME" \
+  --authenticationDatabase admin --password "$API_MG_DB_PASSWORD" <"$B/mongo.archive.gz"
+# RabbitMQ definitions: see "RabbitMQ QueueBind 404" above (rabbitmqctl import_definitions)
+# /etc/qops: tar -C / -xzf "$B/etc-qops.tar.gz" (then re-run site.yml)
+```
+
+Plain `psql <` restores assume an empty database; drop and recreate it first when restoring over a live schema.
 
 ---
 

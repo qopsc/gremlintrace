@@ -292,3 +292,20 @@ print("ok")
   grep -q 'backup_verify_script_path' "${UPGRADE}"
   grep -q 'not merely that backup exited 0' "${UPGRADE}"
 }
+
+@test "upgrade.yml applies the traefik pin and the docs state there is no rollback" {
+  run python3 - "${UPGRADE}" <<'PY'
+import sys, yaml
+play = yaml.safe_load(open(sys.argv[1]))[0]
+roles = [t.get("ansible.builtin.include_role", {}).get("name") for t in play["tasks"]]
+assert "traefik" in roles, "traefik_version bumps are ignored by upgrade.yml"
+assert roles.index("e2b_services") < roles.index("traefik") < roles.index("kodus"), roles
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+  ops="${REPO_ROOT}/docs/operations.md"
+  grep -qi "no rollback" "${ops}"
+  grep -q "pg_restore\|psql .*<" "${ops}"
+  grep -q "mongorestore" "${ops}"
+}
