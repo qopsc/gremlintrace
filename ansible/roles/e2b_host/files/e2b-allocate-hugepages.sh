@@ -9,6 +9,14 @@ NR_OVERCOMMIT_WRITE="${E2B_HUGEPAGES_NR_OVERCOMMIT_WRITE:-${E2B_HUGEPAGES_NR_OVE
 NR_OVERCOMMIT_READ="${E2B_HUGEPAGES_NR_OVERCOMMIT_READ:-${E2B_HUGEPAGES_NR_OVERCOMMIT:-/proc/sys/vm/nr_overcommit_hugepages}}"
 
 PERCENTAGE="${E2B_HUGEPAGES_PERCENTAGE:?E2B_HUGEPAGES_PERCENTAGE is required}"
+# Floor (MiB) kept out of hugepages for the OS, Kodus compose, E2B datastores
+# and Go services, all of which share this single node. Upstream's formula
+# (max(4 GiB, 16%)) assumes dedicated client nodes.
+RESERVED_RAM_MB="${E2B_HUGEPAGES_RESERVED_RAM_MB:-0}"
+if ! [[ "${RESERVED_RAM_MB}" =~ ^[0-9]+$ ]]; then
+  echo "E2B_HUGEPAGES_RESERVED_RAM_MB must be a non-negative integer (got: ${RESERVED_RAM_MB})" >&2
+  exit 1
+fi
 
 if ! [[ "${PERCENTAGE}" =~ ^[0-9]+$ ]] || (( PERCENTAGE < 0 || PERCENTAGE > 100 )); then
   echo "E2B_HUGEPAGES_PERCENTAGE must be an integer between 0 and 100 (got: ${PERCENTAGE})" >&2
@@ -49,6 +57,11 @@ max_normal_ram=$((42 * 1024))
 
 reserved_normal_ram="$(max "${min_normal_ram}" "${min_normal_percentage_ram}")"
 reserved_normal_ram="$(min "${reserved_normal_ram}" "${max_normal_ram}")"
+reserved_normal_ram="$(max "${reserved_normal_ram}" "${RESERVED_RAM_MB}")"
+if (( reserved_normal_ram >= available_ram )); then
+  echo "reserved RAM ${reserved_normal_ram} MiB leaves nothing for hugepages on a ${available_ram} MiB host" >&2
+  exit 1
+fi
 
 hugepages_ram=$((available_ram - reserved_normal_ram))
 hugepages_ram="$(remove_decimal "${hugepages_ram}")"

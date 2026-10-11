@@ -9,6 +9,7 @@ ConditionPathIsMountPoint={{ e2b_host_hugepages_mount }}
 Type=oneshot
 RemainAfterExit=yes
 Environment=E2B_HUGEPAGES_PERCENTAGE={{ e2b_hugepages_percentage }}
+Environment=E2B_HUGEPAGES_RESERVED_RAM_MB={{ e2b_hugepages_reserved_ram_mb }}
 ExecStart=/usr/local/lib/qops/e2b-allocate-hugepages.sh
 
 [Install]

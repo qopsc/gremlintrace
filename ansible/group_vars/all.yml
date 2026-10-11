@@ -38,6 +38,12 @@ e2b_data_device: ""
 # Percentage of RAM reserved for hugetlbfs (remainder for overcommit hugepages).
 e2b_hugepages_percentage: 80
 
+# RAM (MiB) kept out of hugepages for the OS, Kodus compose, E2B datastores and
+# Go services that share this node. Upstream's allocator assumes dedicated
+# sandbox nodes and would leave a 32 GiB host ~5 GiB. Raise for larger Kodus
+# load; the allocator fails loudly if the floor leaves no hugepages at all.
+e2b_hugepages_reserved_ram_mb: 12288
+
 # Total concurrent sandboxes cap (base_v1 tier is 20; installer adds an addons row for the rest).
 e2b_max_concurrent_sandboxes: 100
 
