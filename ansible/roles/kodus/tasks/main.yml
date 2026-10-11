@@ -241,6 +241,10 @@
     KODUS_COMPOSE_BASE: "{{ kodus_install_dir }}/docker-compose.yml"
     KODUS_COMPOSE_OVERRIDE: "{{ kodus_compose_override }}"
     KODUS_ENV_FILE: "{{ kodus_env_file }}"
+    KODUS_WAIT_HEALTH_SH: /usr/local/lib/qops/kodus-wait-health.sh
+    KODUS_HEALTH_URLS: "{{ kodus_health_urls | join(' ') }}"
+    KODUS_HEALTH_RETRIES: "{{ kodus_health_retries }}"
+    KODUS_HEALTH_DELAY: "{{ kodus_health_delay_seconds }}"
   register: kodus_install
   changed_when: (kodus_install.stdout_lines | last | default('')) == "installed"
   tags:

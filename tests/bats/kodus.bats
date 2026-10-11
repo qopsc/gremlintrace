@@ -259,6 +259,7 @@ EOF
   chmod +x "${WORKDIR}/bin/docker"
   run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
     KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    KODUS_WAIT_HEALTH_SH="$(command -v true)" KODUS_HEALTH_URLS="http://127.0.0.1:3000/health" \
     bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
   echo "unchanged: $output"
   [ "$status" -eq 0 ]
@@ -274,6 +275,7 @@ exit 0
 EOF
   run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
     KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    KODUS_WAIT_HEALTH_SH="$(command -v true)" KODUS_HEALTH_URLS="http://127.0.0.1:3000/health" \
     bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
   echo "missing-containers: $output"
   [ "$status" -eq 0 ]
@@ -297,6 +299,7 @@ path.write_text(text)
 PY
   run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
     KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    KODUS_WAIT_HEALTH_SH="$(command -v true)" KODUS_HEALTH_URLS="http://127.0.0.1:3000/health" \
     bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
   echo "changed-env: $output"
   [ "$status" -eq 0 ]
@@ -310,6 +313,7 @@ EOF
   : >"${WORKDIR}/persist/install.digest"
   run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
     KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    KODUS_WAIT_HEALTH_SH="$(command -v true)" KODUS_HEALTH_URLS="http://127.0.0.1:3000/health" \
     bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
   [ "$status" -ne 0 ]
   [ ! -s "${WORKDIR}/persist/install.digest" ] || [ "$(cat "${WORKDIR}/persist/install.digest")" = "" ]
@@ -835,6 +839,46 @@ for svc in ("kodus-web", "api", "worker", "worker-analytics", "webhooks", "kodus
     hosts = set(doc["services"][svc].get("extra_hosts", []))
     missing = needed - hosts
     assert not missing, f"{svc} missing {sorted(missing)}"
+print("ok")
+PY
+}
+
+@test "install digest is written only when Kodus is healthy after install.sh" {
+  render_env
+  bash "${REPO_ROOT}/tests/fixtures/render-template.sh" \
+    ansible/roles/kodus/templates/docker-compose.override.yml.j2 \
+    >"${WORKDIR}/installer/docker-compose.override.yml" || true
+  printf '#!/usr/bin/env bash\necho RAN-INSTALL\nexit 0\n' >"${WORKDIR}/installer/scripts/install.sh"
+  chmod +x "${WORKDIR}/installer/scripts/install.sh"
+  printf '#!/usr/bin/env bash\necho cid-running\nexit 0\n' >"${WORKDIR}/bin/docker"
+  chmod +x "${WORKDIR}/bin/docker"
+  rm -f "${WORKDIR}/persist/install.digest"
+  # upstream install.sh has no set -e: a failed health wait still exits 0
+  run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
+    KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    KODUS_WAIT_HEALTH_SH="$(command -v false)" \
+    KODUS_HEALTH_URLS="http://127.0.0.1:3000/health http://127.0.0.1:3001/health" \
+    bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
+  echo "unhealthy: ${output}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"RAN-INSTALL"* ]]
+  [[ "$output" == *"not healthy"* ]]
+  [ ! -e "${WORKDIR}/persist/install.digest" ]
+  run env PATH="${WORKDIR}/bin:${PATH}" DOCKER_BIN=docker \
+    KODUS_COMPOSE_MERGE_PY="${MERGE_PY}" \
+    KODUS_WAIT_HEALTH_SH="$(command -v true)" \
+    KODUS_HEALTH_URLS="http://127.0.0.1:3000/health" \
+    bash "${INSTALL_SH}" "${WORKDIR}/installer" "${WORKDIR}/persist/install.digest" testdigest
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"installed"* ]]
+  [ -f "${WORKDIR}/persist/install.digest" ]
+  grep -q "kodus_health_urls" "${REPO_ROOT}/ansible/roles/kodus/tasks/main.yml"
+  python3 - "${REPO_ROOT}/ansible/roles/kodus/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+t = next(t for t in tasks if "kodus-install-if-needed.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", "")))
+env = t["environment"]
+assert "kodus_health_urls" in str(env.get("KODUS_HEALTH_URLS", "")), env
 print("ok")
 PY
 }

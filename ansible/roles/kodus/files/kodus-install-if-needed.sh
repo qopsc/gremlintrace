@@ -10,6 +10,10 @@ COMPOSE_OVERRIDE="${KODUS_COMPOSE_OVERRIDE:-${INSTALL_DIR}/docker-compose.overri
 ENV_FILE="${KODUS_ENV_FILE:-${INSTALL_DIR}/.env}"
 INSTALL_SH="${KODUS_INSTALL_SH:-${INSTALL_DIR}/scripts/install.sh}"
 MERGE_PY="${KODUS_COMPOSE_MERGE_PY:-/usr/local/lib/qops/compose-merge-ports.py}"
+WAIT_HEALTH_SH="${KODUS_WAIT_HEALTH_SH:-/usr/local/lib/qops/kodus-wait-health.sh}"
+HEALTH_URLS="${KODUS_HEALTH_URLS:?KODUS_HEALTH_URLS (space-separated) required}"
+HEALTH_RETRIES="${KODUS_HEALTH_RETRIES:-60}"
+HEALTH_DELAY="${KODUS_HEALTH_DELAY:-2}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 COMPOSE_FILES=(-f "${COMPOSE_BASE}")
 if [[ -f "${COMPOSE_OVERRIDE}" ]]; then
@@ -51,6 +55,15 @@ fi
 
 cd "${INSTALL_DIR}"
 bash "${INSTALL_SH}"
+# Upstream install.sh has no set -e: a failed health wait or compose up still
+# exits 0. Only a healthy stack earns the digest; otherwise the next run
+# re-installs instead of skipping a half-up deployment.
+for url in ${HEALTH_URLS}; do
+  if ! "${WAIT_HEALTH_SH}" "${url}" "${HEALTH_RETRIES}" "${HEALTH_DELAY}"; then
+    echo "install.sh finished but Kodus is not healthy at ${url}; digest not written" >&2
+    exit 1
+  fi
+done
 umask 077
 mkdir -p "$(dirname "${DIGEST_FILE}")"
 printf '%s\n' "${desired}" >"${DIGEST_FILE}"
