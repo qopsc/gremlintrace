@@ -41,14 +41,46 @@
   tags:
     - e2b_templates
 
-- name: Copy E2B template sources from the controller onto the host
+# Pack on the controller (node_modules and caches excluded, deterministic
+# bytes) and ship one tarball. A plain directory copy pushed thousands of
+# node_modules files over SSH on every run.
+- name: Create a controller temp file for the packed template sources
+  ansible.builtin.tempfile:
+    state: file
+    suffix: -e2b-templates.tar.gz
+  register: e2b_templates_pack_tmp
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  tags:
+    - e2b_templates
+
+- name: Pack E2B template sources on the controller
+  ansible.builtin.script:
+    cmd: pack-template-sources.sh {{ e2b_templates_controller_src_dir }} {{ e2b_templates_pack_tmp.path }}
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  tags:
+    - e2b_templates
+
+- name: Copy packed E2B template sources onto the host
   ansible.builtin.copy:
-    src: "{{ e2b_templates_controller_src_dir }}/"
-    dest: "{{ e2b_templates_src_dir }}/"
+    src: "{{ e2b_templates_pack_tmp.path }}"
+    dest: "{{ e2b_templates_src_tarball }}"
     owner: root
     group: root
     mode: "0644"
-    directory_mode: "0755"
+  tags:
+    - e2b_templates
+
+- name: Remove the controller temp tarball
+  ansible.builtin.file:
+    path: "{{ e2b_templates_pack_tmp.path }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  changed_when: false
   tags:
     - e2b_templates
 
@@ -56,7 +88,7 @@
   ansible.builtin.command:
     cmd: >-
       /usr/local/lib/qops/install-template-sources.sh
-      {{ e2b_templates_src_dir }}
+      {{ e2b_templates_src_tarball }}
       {{ e2b_templates_install_dir }}
   register: e2b_templates_sources
   changed_when: (e2b_templates_sources.stdout | trim) == "installed"

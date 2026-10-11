@@ -9,6 +9,8 @@ e2b_templates_install_dir: /usr/local/lib/qops/e2b-templates
 # Controller-side path (playbook_dir). Copied onto the managed host before any
 # host-side command reads the sources.
 e2b_templates_controller_src_dir: "{{ playbook_dir }}/../../e2b/templates"
+# Packed sources as shipped to the host (pack-template-sources.sh output).
+e2b_templates_src_tarball: "{{ e2b_templates_src_dir }}/sources.tar.gz"
 e2b_templates_src_dir: /var/cache/qops/e2b-templates-src
 e2b_templates_domain: "e2b.{{ qops_domain }}"
 e2b_templates_base_image: ""

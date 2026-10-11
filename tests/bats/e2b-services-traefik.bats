@@ -974,7 +974,7 @@ PY
   [ "$output" = "ok" ]
 }
 
-@test "template sources are copied from the controller before any host command" {
+@test "template sources are packed on the controller and shipped before any host command" {
   run python3 - "${REPO_ROOT}" <<'PY'
 import pathlib
 import sys
@@ -984,22 +984,18 @@ root = pathlib.Path(sys.argv[1])
 defaults = yaml.safe_load((root / "ansible/roles/e2b_templates/defaults/main.yml").read_text())
 assert "playbook_dir" not in str(defaults["e2b_templates_src_dir"])
 assert "playbook_dir" in str(defaults["e2b_templates_controller_src_dir"])
+assert "e2b_templates_src_dir" in str(defaults["e2b_templates_src_tarball"])
 tasks = yaml.safe_load((root / "ansible/roles/e2b_templates/tasks/main.yml").read_text())
-copy_src = None
-install_cmd = None
-for item in tasks:
-    block = item.get("ansible.builtin.copy") or item.get("copy")
-    if isinstance(block, dict) and "e2b_templates_controller_src_dir" in str(block.get("src", "")):
-        copy_src = block
-    cmd = item.get("ansible.builtin.command") or item.get("command")
-    if isinstance(cmd, dict) and "install-template-sources.sh" in str(cmd.get("cmd", "")):
-        install_cmd = str(cmd.get("cmd", ""))
-    if isinstance(cmd, str) and "install-template-sources.sh" in cmd:
-        install_cmd = cmd
-assert copy_src is not None, "missing controller-to-host copy"
-assert "e2b_templates_src_dir" in str(copy_src.get("dest", ""))
-assert install_cmd is not None
-assert "e2b_templates_src_dir" in install_cmd
+names = [t.get("name", "") for t in tasks]
+pack = next(i for i, t in enumerate(tasks)
+            if "e2b_templates_controller_src_dir" in str((t.get("ansible.builtin.script") or {}).get("cmd", "")))
+ship = next(i for i, t in enumerate(tasks)
+            if "e2b_templates_src_tarball" in str((t.get("ansible.builtin.copy") or {}).get("dest", "")))
+install = next(i for i, t in enumerate(tasks)
+               if "install-template-sources.sh" in str((t.get("ansible.builtin.command") or {}).get("cmd", "")))
+install_cmd = tasks[install]["ansible.builtin.command"]["cmd"]
+assert pack < ship < install, (names[pack], names[ship], names[install])
+assert "e2b_templates_src_tarball" in install_cmd
 assert "playbook_dir" not in install_cmd
 print("ok")
 PY
@@ -1567,6 +1563,129 @@ ca = str(env.get("TRAEFIK_HAIRPIN_CA_FILE", ""))
 assert "tls_ca_path" in ca, env
 gv = yaml.safe_load((root / "ansible/group_vars/all.yml").read_text())
 assert "kodus_hairpin_hosts" in gv, "kodus_hairpin_hosts must be documented in group_vars"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+# --- e2b_templates: controller -> host transfer without node_modules -----------
+
+make_template_src() {
+  local src="$1"
+  rm -rf "${src}"
+  mkdir -p "${src}/node_modules/e2b/dist" "${src}/.vite" "${src}/templates"
+  printf '{"name":"t"}\n' >"${src}/package.json"
+  printf 'export {}\n' >"${src}/build-templates.ts"
+  printf 'FROM scratch\n' >"${src}/templates/Dockerfile"
+  head -c 65536 /dev/zero >"${src}/node_modules/e2b/dist/index.mjs"
+  printf 'cache\n' >"${src}/.vite/x"
+}
+
+@test "pack-template-sources produces a deterministic tarball without node_modules" {
+  pack="${REPO_ROOT}/ansible/roles/e2b_templates/files/pack-template-sources.sh"
+  src="${BATS_TMPDIR}/tpl-src"
+  make_template_src "${src}"
+  run bash "${pack}" "${src}" "${BATS_TMPDIR}/tpl-a.tar.gz"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  listing="$(tar -tzf "${BATS_TMPDIR}/tpl-a.tar.gz")"
+  [[ "${listing}" == *"package.json"* ]]
+  [[ "${listing}" == *"templates/Dockerfile"* ]]
+  [[ "${listing}" != *"node_modules"* ]]
+  [[ "${listing}" != *".vite"* ]]
+  [ "$(wc -c <"${BATS_TMPDIR}/tpl-a.tar.gz" | tr -d ' ')" -lt 4096 ]
+  # byte-identical on repack so ansible.builtin.copy stays changed=0
+  sleep 1
+  touch "${src}/package.json"
+  bash "${pack}" "${src}" "${BATS_TMPDIR}/tpl-b.tar.gz" >/dev/null
+  cmp "${BATS_TMPDIR}/tpl-a.tar.gz" "${BATS_TMPDIR}/tpl-b.tar.gz"
+}
+
+@test "install-template-sources accepts the packed tarball and stays idempotent" {
+  pack="${REPO_ROOT}/ansible/roles/e2b_templates/files/pack-template-sources.sh"
+  install="${REPO_ROOT}/ansible/roles/e2b_templates/files/install-template-sources.sh"
+  src="${BATS_TMPDIR}/tpl-src2"
+  make_template_src "${src}"
+  bash "${pack}" "${src}" "${BATS_TMPDIR}/tpl.tar.gz" >/dev/null
+  dest="${BATS_TMPDIR}/tpl-install"
+  rm -rf "${dest}"
+  run bash "${install}" "${BATS_TMPDIR}/tpl.tar.gz" "${dest}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "installed" ]
+  [ -f "${dest}/package.json" ]
+  [ -f "${dest}/templates/Dockerfile" ]
+  [ ! -e "${dest}/node_modules" ]
+  run bash "${install}" "${BATS_TMPDIR}/tpl.tar.gz" "${dest}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unchanged" ]
+}
+
+@test "e2b_templates ships a packed tarball instead of copying the source tree" {
+  run python3 - "${REPO_ROOT}/ansible/roles/e2b_templates/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+for t in tasks:
+    src = str(t.get("ansible.builtin.copy", {}).get("src", ""))
+    assert not (src.rstrip("/").endswith("e2b_templates_controller_src_dir }}") ), "directory copy ships node_modules: " + t["name"]
+pack = [t for t in tasks if "pack-template-sources.sh" in str((t.get("ansible.builtin.script") or t.get("ansible.builtin.command") or {}).get("cmd", ""))]
+assert pack, "no controller-side pack step"
+assert pack[0].get("delegate_to") == "localhost", "pack must run on the controller"
+assert pack[0].get("become") is False
+ship = [t for t in tasks if "e2b_templates_src_tarball" in str(t.get("ansible.builtin.copy", {}).get("dest", ""))
+        and "e2b_templates_pack_tmp" in str(t["ansible.builtin.copy"].get("src", ""))]
+assert ship, "packed tarball is never copied to the host"
+install = [t for t in tasks if "install-template-sources.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", ""))]
+assert install and "e2b_templates_src_tarball" in install[0]["ansible.builtin.command"]["cmd"], "installer must consume the tarball"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "e2b_datastores compose task detects changes on stderr where compose reports them" {
+  run python3 - "${REPO_ROOT}/ansible/roles/e2b_datastores/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+up = next(t for t in tasks if "up -d" in str(t.get("ansible.builtin.command", {}).get("cmd", "")))
+cw = str(up.get("changed_when", ""))
+# `docker compose up` prints Created/Started/Recreated progress on stderr.
+assert "stderr" in cw, cw
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "provided TLS check verifies the certificate covers every routed hostname" {
+  script="${REPO_ROOT}/ansible/roles/traefik/files/check-provided-tls.sh"
+  work="${BATS_TMPDIR}/tls-san"
+  rm -rf "${work}"; mkdir -p "${work}"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=example.com' \
+    -addext 'subjectAltName=DNS:example.com,DNS:*.example.com' \
+    -keyout "${work}/tls.key" -out "${work}/tls.crt" >/dev/null 2>&1
+  # one-level wildcard covers kodus.example.com but not *.e2b.example.com
+  run bash "${script}" "${work}/tls.crt" "${work}/tls.key" "" "kodus.example.com,kodus-api.example.com"
+  [ "$status" -eq 0 ]
+  run bash "${script}" "${work}/tls.crt" "${work}/tls.key" "" "kodus.example.com,api.e2b.example.com,x.e2b.example.com"
+  echo "${output}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"api.e2b.example.com"* ]]
+  [[ "$output" == *"x.e2b.example.com"* ]]
+  [[ "$output" != *"kodus.example.com"* ]]
+  run python3 - "${REPO_ROOT}/ansible/roles/traefik/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+t = next(t for t in tasks if "check-provided-tls.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", "")))
+cmd = t["ansible.builtin.command"]["cmd"]
+assert "traefik_provided_tls_hostnames" in cmd, cmd
+import pathlib
+defaults = yaml.safe_load(pathlib.Path(sys.argv[1]).parent.parent.joinpath("defaults/main.yml").read_text())
+names = " ".join(defaults["traefik_provided_tls_hostnames"])
+for name in ("api.e2b.", "kodus.", "kodus-api.", "kodus-webhooks.", ".e2b."):
+    assert name in names, f"{name} missing from traefik_provided_tls_hostnames: {names}"
+assert any(n.endswith("e2b.{{ qops_domain }}") and not n.startswith("api.") for n in defaults["traefik_provided_tls_hostnames"]), "no *.e2b sample label"
 print("ok")
 PY
   [ "$status" -eq 0 ]

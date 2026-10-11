@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# Copy e2b/templates onto the host without node_modules.
+# Copy e2b/templates onto the host without node_modules. SRC is either a
+# directory or the tar.gz produced by pack-template-sources.sh on the controller.
 set -euo pipefail
 
-SRC="${1:?source directory required}"
+SRC="${1:?source directory or tarball required}"
 DEST="${2:?destination directory required}"
+
+if [[ -f "${SRC}" && "${SRC}" == *.tar.gz ]]; then
+  extract_dir="$(mktemp -d)"
+  trap 'rm -rf "${extract_dir}"' EXIT
+  tar -xzf "${SRC}" -C "${extract_dir}"
+  SRC="${extract_dir}"
+fi
 
 if [[ ! -d "${SRC}" ]]; then
   echo "template source missing: ${SRC}" >&2
