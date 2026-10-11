@@ -42,6 +42,8 @@ assert).
 
 ## Hairpin gate (ordering)
 
+The probe container gets the same `extra_hosts` as Kodus when `kodus_extra_hosts_hairpin` is true and mounts `tls_ca_path` for `internal_ca`. The first-install pass inside this role never fails (it prints `skipped`); the required gate after the kodus role and in `doctor.yml` fails with the hairpin remedy, or, when `extra_hosts` were already applied, says hairpin is not the cause.
+
 `site.yml` order: first play `… → e2b_templates → traefik → kodus → hairpin (required)`; second play `backup → doctor`.
 
 The traefik role runs **before** Kodus creates the `kodus` Docker network.

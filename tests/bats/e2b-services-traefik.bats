@@ -1113,9 +1113,12 @@ echo "not the health page"
 exit 0
 EOF
   chmod +x "${stub}"
-  export TRAEFIK_HAIRPIN_RETRIES=1 TRAEFIK_HAIRPIN_DELAY=0
+  # Only the required gate (site.yml after kodus, doctor.yml) fails on a
+  # non-200; the first-install pass degrades to skipped.
+  export TRAEFIK_HAIRPIN_RETRIES=1 TRAEFIK_HAIRPIN_DELAY=0 TRAEFIK_HAIRPIN_REQUIRED=1
   run bash "${script}" kodus \
     "https://api.e2b.example.com/health" "clickhouse/clickhouse-server:25.8.30.16" "${stub}"
+  unset TRAEFIK_HAIRPIN_REQUIRED
   [ "$status" -ne 0 ]
   [[ "$output" == *"HTTP 200"* ]]
 }
@@ -1472,4 +1475,100 @@ PY
   timeout="$(sed -n 's/^TimeoutStopSec=\([0-9]*\)$/\1/p' "${out}")"
   [ -n "${timeout}" ]
   [ "${timeout}" -ge 2100 ]
+}
+
+# --- hairpin probe: extra_hosts, CA, remedy, non-required degrade -------------
+
+write_hairpin_stub() {
+  # $1 = stub path, $2 = argv log; probe always fails with a connect error
+  cat >"$1" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "network" && "\$2" == "inspect" ]]; then
+  exit 0
+fi
+printf '%s\n' "\$*" >>"$2"
+echo "wget: unable to connect to remote host: Connection timed out" >&2
+exit 4
+EOF
+  chmod +x "$1"
+}
+
+@test "hairpin check in non-required mode degrades to skipped when the probe fails" {
+  script="${REPO_ROOT}/ansible/roles/traefik/files/hairpin-check.sh"
+  stub="${BATS_TMPDIR}/docker-hairpin-degrade"
+  write_hairpin_stub "${stub}" "${BATS_TMPDIR}/hairpin-degrade.log"
+  run env TRAEFIK_HAIRPIN_REQUIRED=0 TRAEFIK_HAIRPIN_RETRIES=1 TRAEFIK_HAIRPIN_DELAY=0 \
+    bash "${script}" kodus "https://api.e2b.example.com/health" "img" "${stub}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *skipped ]]
+  [[ "$output" == *"site.yml"* ]]
+}
+
+@test "hairpin required failure names the hairpin remedy" {
+  script="${REPO_ROOT}/ansible/roles/traefik/files/hairpin-check.sh"
+  stub="${BATS_TMPDIR}/docker-hairpin-remedy"
+  write_hairpin_stub "${stub}" "${BATS_TMPDIR}/hairpin-remedy.log"
+  run env TRAEFIK_HAIRPIN_REQUIRED=1 TRAEFIK_HAIRPIN_RETRIES=1 TRAEFIK_HAIRPIN_DELAY=0 \
+    bash "${script}" kodus "https://api.e2b.example.com/health" "img" "${stub}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"kodus_extra_hosts_hairpin"* ]]
+  [[ "$output" == *"E2B_API_URL"* ]]
+  [[ "$output" == *"E2B_SANDBOX_URL"* ]]
+  # when extra hosts were already in play, say that hairpin is not the cause
+  run env TRAEFIK_HAIRPIN_REQUIRED=1 TRAEFIK_HAIRPIN_RETRIES=1 TRAEFIK_HAIRPIN_DELAY=0 \
+    TRAEFIK_HAIRPIN_EXTRA_HOSTS="api.e2b.example.com:host-gateway" \
+    bash "${script}" kodus "https://api.e2b.example.com/health" "img" "${stub}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"already"* ]]
+  [[ "$output" == *"host-gateway"* ]]
+}
+
+@test "hairpin probe passes extra hosts and a CA file into the probe container" {
+  script="${REPO_ROOT}/ansible/roles/traefik/files/hairpin-check.sh"
+  stub="${BATS_TMPDIR}/docker-hairpin-args"
+  log="${BATS_TMPDIR}/hairpin-args.log"
+  : >"${log}"
+  write_hairpin_stub "${stub}" "${log}"
+  ca="${BATS_TMPDIR}/qops-ca.pem"
+  printf 'CA\n' >"${ca}"
+  run env TRAEFIK_HAIRPIN_REQUIRED=1 TRAEFIK_HAIRPIN_RETRIES=1 TRAEFIK_HAIRPIN_DELAY=0 \
+    TRAEFIK_HAIRPIN_EXTRA_HOSTS="api.e2b.example.com:host-gateway kodus-api.example.com:host-gateway" \
+    TRAEFIK_HAIRPIN_CA_FILE="${ca}" \
+    bash "${script}" kodus "https://api.e2b.example.com/health" "img" "${stub}"
+  [ "$status" -ne 0 ]
+  argv="$(cat "${log}")"
+  echo "${argv}"
+  [[ "${argv}" == *"--add-host api.e2b.example.com:host-gateway"* ]]
+  [[ "${argv}" == *"--add-host kodus-api.example.com:host-gateway"* ]]
+  [[ "${argv}" == *"-v ${ca}:/qops-hairpin-ca.pem:ro"* ]]
+  [[ "${argv}" == *"--ca-certificate=/qops-hairpin-ca.pem"* ]]
+  # no CA and no extra hosts -> neither flag appears
+  : >"${log}"
+  run env TRAEFIK_HAIRPIN_REQUIRED=1 TRAEFIK_HAIRPIN_RETRIES=1 TRAEFIK_HAIRPIN_DELAY=0 \
+    bash "${script}" kodus "https://api.e2b.example.com/health" "img" "${stub}"
+  argv="$(cat "${log}")"
+  [[ "${argv}" != *"--add-host"* ]]
+  [[ "${argv}" != *"--ca-certificate"* ]]
+}
+
+@test "hairpin task hands kodus_hairpin_hosts and the CA to the probe when hairpin fallback is on" {
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+tasks = yaml.safe_load((root / "ansible/roles/traefik/tasks/hairpin.yml").read_text())
+probe = next(t for t in tasks if "hairpin-check.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", "")))
+env = probe["environment"]
+hosts = str(env.get("TRAEFIK_HAIRPIN_EXTRA_HOSTS", ""))
+assert "kodus_extra_hosts_hairpin" in hosts, env
+assert "kodus_hairpin_hosts" in hosts, env
+assert "host-gateway" in hosts, env
+ca = str(env.get("TRAEFIK_HAIRPIN_CA_FILE", ""))
+assert "tls_ca_path" in ca, env
+gv = yaml.safe_load((root / "ansible/group_vars/all.yml").read_text())
+assert "kodus_hairpin_hosts" in gv, "kodus_hairpin_hosts must be documented in group_vars"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }

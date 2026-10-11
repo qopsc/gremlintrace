@@ -24,6 +24,12 @@
     TRAEFIK_HAIRPIN_REQUIRED: "{{ '1' if (traefik_hairpin_required | bool) else '0' }}"
     TRAEFIK_HAIRPIN_RETRIES: "{{ traefik_hairpin_retries }}"
     TRAEFIK_HAIRPIN_DELAY: "{{ traefik_hairpin_delay_seconds }}"
+    # Same extra_hosts the kodus role gives its containers, so the probe sees
+    # what Kodus sees; empty unless the operator enabled the hairpin fallback.
+    TRAEFIK_HAIRPIN_EXTRA_HOSTS: >-
+      {{ (kodus_hairpin_hosts | default([]) | map('regex_replace', '$', ':host-gateway') | join(' '))
+         if (kodus_extra_hosts_hairpin | default(false) | bool) else '' }}
+    TRAEFIK_HAIRPIN_CA_FILE: "{{ (tls_ca_path | default('')) if tls_mode == 'internal_ca' else '' }}"
   register: traefik_hairpin
   changed_when: false
   tags:
