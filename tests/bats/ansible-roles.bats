@@ -822,6 +822,12 @@ install = next(t for t in tasks if "run-preflight.sh" in str(t.get("ansible.buil
 # Otherwise --check skips the command, and the slurp of the absent report fails.
 assert run.get("check_mode") is False, "run task must set check_mode: false"
 assert install.get("check_mode") is False, "helper install must set check_mode: false"
+# the directories the copy and the report need must also exist under --check
+run_idx = tasks.index(run)
+dirs = [t for t in tasks[:run_idx] if t.get("ansible.builtin.file", {}).get("state") == "directory"]
+assert dirs, "no directory tasks before the run"
+for t in dirs:
+    assert t.get("check_mode") is False, f"{t['name']} must set check_mode: false"
 print("ok")
 PY
   [ "$status" -eq 0 ]
