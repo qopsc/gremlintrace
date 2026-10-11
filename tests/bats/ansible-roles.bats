@@ -747,3 +747,41 @@ PY
   printf '%s\n' "${unit}" | grep -q '^Before=.*docker.service'
   printf '%s\n' "${unit}" | grep -q '^RemainAfterExit=yes'
 }
+
+@test "docker role flushes its restart handler before later roles start datastores" {
+  run python3 - "${REPO_ROOT}/ansible/roles/docker/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+# Otherwise `Restart docker` fires at e2b_services' flush, after datastores,
+# migrations and the seeder ran, and networks created before the restart use
+# Docker's default pools instead of daemon.json.
+assert tasks[-1].get("ansible.builtin.meta") == "flush_handlers", tasks[-1].get("name")
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "common loads nf_conntrack at boot and before applying its sysctl keys" {
+  run python3 - "${REPO_ROOT}/ansible/roles/common/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = [t.get("name", "") for t in tasks]
+sysctl = next(i for i, t in enumerate(tasks)
+              if str(t.get("ansible.builtin.template", {}).get("dest", "")).startswith("/etc/sysctl.d/"))
+# systemd-sysctl runs before Docker loads nf_conntrack, so
+# net.netfilter.nf_conntrack_max is silently skipped at boot unless the module
+# is listed in modules-load.d; the same applies on first install.
+persist = [i for i, t in enumerate(tasks)
+           if str(t.get("ansible.builtin.copy", {}).get("dest", "")).startswith("/etc/modules-load.d/")
+           and "nf_conntrack" in str(t["ansible.builtin.copy"].get("content", ""))]
+assert persist, "no /etc/modules-load.d entry for nf_conntrack"
+load = [i for i, t in enumerate(tasks)
+        if "nf_conntrack" in str(t.get("community.general.modprobe", t.get("ansible.builtin.command", "")))]
+assert load, "nf_conntrack is never loaded during the play"
+assert max(persist + load) < sysctl, "module load/persist must precede the sysctl deploy"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}

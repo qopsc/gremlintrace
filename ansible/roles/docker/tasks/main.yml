@@ -147,3 +147,12 @@
     state: started
   tags:
     - docker
+
+# Apply a pending daemon.json/package restart now, while nothing depends on
+# Docker yet. Left to the e2b_services flush it would bounce the daemon after
+# datastores, migrations and the seeder ran, and networks created before the
+# restart would ignore daemon.json's address pools.
+- name: Flush docker handlers before dependent roles
+  ansible.builtin.meta: flush_handlers
+  tags:
+    - docker
