@@ -171,3 +171,13 @@ PY
   grep -q 'assert_live_runtime' "${ORCH}"
   grep -q 'QOPS_CI_ORCHESTRATOR_RESTART_SKIP_UNVERIFIED' "${ORCH}"
 }
+
+@test "matrix secret readers check for passwordless sudo before diagnosing a missing key" {
+  local script
+  for script in "${ORCH}" "${WEBHOOK}"; do
+    grep -q 'sudo -n true' "${script}" || {
+      echo "missing sudo -n precheck: ${script}" >&2
+      return 1
+    }
+  done
+}

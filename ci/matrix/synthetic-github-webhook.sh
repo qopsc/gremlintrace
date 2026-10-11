@@ -23,6 +23,10 @@ ENV_FILE="/opt/kodus-installer/.env"
 # Root-only file: elevate the read, never the file mode.
 read_secret() {
   local file="$1" key="$2" rc=0
+  sudo -n true 2>/dev/null || {
+    echo "passwordless sudo is required to read root-only ${file}" >&2
+    return 1
+  }
   sudo test -f "${file}" || {
     echo "secret file missing: ${file}" >&2
     return 1
