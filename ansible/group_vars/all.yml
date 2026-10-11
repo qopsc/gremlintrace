@@ -79,6 +79,17 @@ kodus_openai_force_base_url: ""
 # host-gateway, and .env sets E2B_API_URL / E2B_SANDBOX_URL to those names.
 kodus_extra_hosts_hairpin: false
 
+# Hostnames mapped to host-gateway when kodus_extra_hosts_hairpin is true. Web,
+# API and MCP calls between Kodus services go through these public names too,
+# so they need the same fallback as the E2B endpoints. Derived; edit only if
+# the Traefik routers change.
+kodus_hairpin_hosts:
+  - "api.e2b.{{ qops_domain }}"
+  - "sandbox.e2b.{{ qops_domain }}"
+  - "kodus.{{ qops_domain }}"
+  - "kodus-api.{{ qops_domain }}"
+  - "kodus-webhooks.{{ qops_domain }}"
+
 # Globally routable IPv4 for the sandbox isolation probe. Required: preflight
 # writes a failure report before install when this or qops_lan_ipv4 is empty or
 # invalid, rather than silently using a private address.

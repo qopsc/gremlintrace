@@ -27,7 +27,7 @@ and `docker-compose.override.yml`, start the stack without forking Kodus.
 
 Webhook URLs are validated against the dedicated `kodus-webhooks.<d>` host. Upstream `scripts/doctor.sh` is then run; failure is tolerated **only** when the complete ERROR set is exactly the known `host must match WEB_HOSTNAME_API` diagnostics.
 
-When `kodus_extra_hosts_hairpin` is true, `.env` sets `E2B_API_URL=https://api.e2b.<d>` and `E2B_SANDBOX_URL=https://sandbox.e2b.<d>`, and compose `extra_hosts` maps both names to `host-gateway`.
+When `kodus_extra_hosts_hairpin` is true, `.env` sets `E2B_API_URL=https://api.e2b.<d>` and `E2B_SANDBOX_URL=https://sandbox.e2b.<d>`, and compose `extra_hosts` maps every name in `kodus_hairpin_hosts` (`api.e2b`, `sandbox.e2b`, `kodus`, `kodus-api`, `kodus-webhooks` under `<d>`) to `host-gateway`, so web→api and api→MCP calls through the public names survive a NAT that cannot hairpin. The Traefik hairpin probe receives the same `extra_hosts`.
 
 Operator callback URLs printed at the end of the role:
 

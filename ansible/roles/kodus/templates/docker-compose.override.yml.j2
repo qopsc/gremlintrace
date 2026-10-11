@@ -5,8 +5,9 @@ services:
       - "{{ kodus_bind_host }}:{{ kodus_web_port }}:{{ kodus_web_port }}"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
-      - "api.e2b.{{ qops_domain }}:host-gateway"
-      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% for host in kodus_hairpin_hosts %}
+      - "{{ host }}:host-gateway"
+{% endfor %}
 {% endif %}
 {% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
     environment:
@@ -20,8 +21,9 @@ services:
       - "{{ kodus_bind_host }}:{{ kodus_api_port }}:3001"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
-      - "api.e2b.{{ qops_domain }}:host-gateway"
-      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% for host in kodus_hairpin_hosts %}
+      - "{{ host }}:host-gateway"
+{% endfor %}
 {% endif %}
 {% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
     environment:
@@ -34,8 +36,9 @@ services:
   worker:
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
-      - "api.e2b.{{ qops_domain }}:host-gateway"
-      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% for host in kodus_hairpin_hosts %}
+      - "{{ host }}:host-gateway"
+{% endfor %}
 {% endif %}
 {% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
     environment:
@@ -47,8 +50,9 @@ services:
   worker-analytics:
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
-      - "api.e2b.{{ qops_domain }}:host-gateway"
-      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% for host in kodus_hairpin_hosts %}
+      - "{{ host }}:host-gateway"
+{% endfor %}
 {% endif %}
 {% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
     environment:
@@ -63,8 +67,9 @@ services:
       - "{{ kodus_bind_host }}:{{ kodus_webhooks_port }}:{{ kodus_webhooks_port }}"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
-      - "api.e2b.{{ qops_domain }}:host-gateway"
-      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% for host in kodus_hairpin_hosts %}
+      - "{{ host }}:host-gateway"
+{% endfor %}
 {% endif %}
 {% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
     environment:
@@ -78,8 +83,9 @@ services:
       - "{{ kodus_bind_host }}:{{ kodus_mcp_port }}:{{ kodus_mcp_port }}"
 {% if kodus_extra_hosts_hairpin | bool %}
     extra_hosts:
-      - "api.e2b.{{ qops_domain }}:host-gateway"
-      - "sandbox.e2b.{{ qops_domain }}:host-gateway"
+{% for host in kodus_hairpin_hosts %}
+      - "{{ host }}:host-gateway"
+{% endfor %}
 {% endif %}
 {% if tls_mode == "internal_ca" and (tls_ca_path | default('') | length > 0) %}
     environment:

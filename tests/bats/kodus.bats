@@ -802,3 +802,39 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
+
+@test "hairpin fallback maps the Kodus hostnames to host-gateway too, not only E2B" {
+  vars_file="${WORKDIR}/hairpin-vars.yml"
+  python3 - "${REPO_ROOT}" "${vars_file}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+merged = {}
+for path in (root / "versions.yml", root / "ansible/group_vars/all.yml"):
+    merged.update(yaml.safe_load(path.read_text()) or {})
+for role in ("common", "traefik", "kodus"):
+    defaults = root / f"ansible/roles/{role}/defaults/main.yml"
+    if defaults.is_file():
+        merged.update(yaml.safe_load(defaults.read_text()) or {})
+merged["qops_domain"] = "example.com"
+merged["kodus_extra_hosts_hairpin"] = True
+pathlib.Path(sys.argv[2]).write_text(yaml.safe_dump(merged))
+PY
+  run bash "${REPO_ROOT}/tests/fixtures/render-template.sh" \
+    ansible/roles/kodus/templates/docker-compose.override.yml.j2 "${vars_file}"
+  [ "$status" -eq 0 ]
+  rendered="${output}"
+  python3 - "${rendered}" <<'PY'
+import sys, yaml
+doc = yaml.safe_load(sys.argv[1].replace("!override", ""))
+needed = {
+    "api.e2b.example.com:host-gateway", "sandbox.e2b.example.com:host-gateway",
+    "kodus.example.com:host-gateway", "kodus-api.example.com:host-gateway",
+    "kodus-webhooks.example.com:host-gateway",
+}
+for svc in ("kodus-web", "api", "worker", "worker-analytics", "webhooks", "kodus-mcp-manager"):
+    hosts = set(doc["services"][svc].get("extra_hosts", []))
+    missing = needed - hosts
+    assert not missing, f"{svc} missing {sorted(missing)}"
+print("ok")
+PY
+}
