@@ -150,20 +150,21 @@ EOF
   [[ "$output" == *"ansible-playbook not found"* ]]
 }
 
-@test "non-x86_64 arch is rejected" {
+@test "a macOS or arm64 control machine can drive a remote install" {
+  # The x86_64/Linux requirement is the target's (preflight enforces it);
+  # the controller only runs ansible-playbook over SSH.
   cat >"${STUB_BIN}/uname" <<'EOF'
 #!/bin/bash
 case "${1:-}" in
-  -s) echo Linux ;;
-  -m) echo "${BOOTSTRAP_STUB_UNAME_M:-x86_64}" ;;
-  *) command -v /usr/bin/uname >/dev/null 2>&1 && exec /usr/bin/uname "$@" || exec /bin/uname "$@" ;;
+  -s) echo Darwin ;;
+  -m) echo arm64 ;;
 esac
 EOF
   chmod +x "${STUB_BIN}/uname"
-  run env PATH="${STUB_BIN}:${PATH}" BOOTSTRAP_STUB_UNAME_M=aarch64 \
-    "${BOOTSTRAP}" --skip-install
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"x86_64"* ]]
+  run "${BOOTSTRAP}" --skip-install --syntax-check
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  grep -q '^ansible-playbook' "${BOOTSTRAP_ORDER_LOG}"
 }
 
 write_galaxy_stub() {

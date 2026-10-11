@@ -18,6 +18,7 @@ setup() {
   export BOOTSTRAP_STUB_LOG="${TEST_TMPDIR}/ansible-playbook.log"
   export BOOTSTRAP_ORDER_LOG="${TEST_TMPDIR}/order.log"
   export BOOTSTRAP_PIPX_ENV_ONCE_FILE="${TEST_TMPDIR}/pipx-env-once"
+  export BOOTSTRAP_PIPX_INSTALL_ARGS="${TEST_TMPDIR}/pipx-install-args"
   export BOOTSTRAP_PIPX_BIN="${PIPX_BIN}"
   export BOOTSTRAP_PIPX_BIN_EMPTY="${PIPX_BIN_EMPTY}"
   export BOOTSTRAP_AP_PLAYBOOK_STUB="${BATS_TEST_DIRNAME}/helpers/ansible-playbook"
@@ -42,6 +43,7 @@ case "${1:-}" in
     exit 0
     ;;
   install)
+    printf '%s\n' "$*" >>"${BOOTSTRAP_PIPX_INSTALL_ARGS}"
     if [[ "${BOOTSTRAP_PIPX_INSTALL_FAIL:-}" == "already-installed" ]]; then
       echo "pipx: already installed" >&2
       exit 1
@@ -78,7 +80,9 @@ teardown() {
 }
 
 run_bootstrap() {
-  env PATH="${BOOTSTRAP_TEST_PATH}" /bin/bash "${BOOTSTRAP}" "$@"
+  # Stubs first; then only the system bin dirs so bootstrap's coreutils
+  # (sed, head, find, dirname) resolve while no real pipx/ansible leaks in.
+  env PATH="${BOOTSTRAP_TEST_PATH}:/usr/bin:/bin" /bin/bash "${BOOTSTRAP}" "$@"
 }
 
 assert_order_equals() {
@@ -178,4 +182,12 @@ EOF
     "pipx:install" \
     "pipx:environment" \
     "ansible-playbook"
+}
+
+@test "pipx installs ansible-core pinned to versions.yml, not an unpinned ansible" {
+  core="$(python3 "${REPO_ROOT}/ci/yaml_versions.py" get ansible_core_version "${REPO_ROOT}/versions.yml")"
+  run run_bootstrap --syntax-check
+  [ "$status" -eq 0 ]
+  grep -q -- "ansible-core==${core}" "${BOOTSTRAP_PIPX_INSTALL_ARGS}"
+  ! grep -Eq -- '(^| )ansible($| )' "${BOOTSTRAP_PIPX_INSTALL_ARGS}"
 }

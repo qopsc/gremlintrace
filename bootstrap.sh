@@ -42,6 +42,15 @@ Examples:
 EOF
 }
 
+# Read one scalar pin from versions.yml without needing python on the control
+# machine (the pipx path runs before any Python environment is guaranteed).
+pin() {
+  local value
+  value="$(sed -n "s/^$1:[[:space:]]*\"\{0,1\}\([^\"#]*\)\"\{0,1\}[[:space:]]*\(#.*\)\{0,1\}$/\1/p" "${SCRIPT_DIR}/versions.yml" | head -n1)"
+  [[ -n "${value}" ]] || die "versions.yml has no value for $1"
+  printf '%s\n' "${value}"
+}
+
 log() {
   printf '%s\n' "$*" >&2
 }
@@ -49,18 +58,6 @@ log() {
 die() {
   log "error: $*"
   exit 1
-}
-
-require_linux_x86_64() {
-  local os arch
-  os="$(uname -s)"
-  arch="$(uname -m)"
-  if [[ "${os}" != "Linux" ]]; then
-    die "codereviewer v1 supports Linux hosts only (detected: ${os})"
-  fi
-  if [[ "${arch}" != "x86_64" ]]; then
-    die "codereviewer v1 supports x86_64 only (detected: ${arch})"
-  fi
 }
 
 detect_os_family() {
@@ -148,7 +145,10 @@ ensure_ansible() {
   if command -v ansible-playbook >/dev/null 2>&1; then
     return 0
   fi
-  if ! pipx install --include-deps ansible; then
+  local core_spec
+  core_spec="ansible-core==$(pin ansible_core_version)"
+  # ansible-core pinned from versions.yml; collections come from ensure_collections.
+  if ! pipx install "${core_spec}"; then
     prepend_pipx_bin_to_path
     if command -v ansible-playbook >/dev/null 2>&1; then
       return 0
@@ -171,7 +171,7 @@ ensure_collections() {
   installed="$(ansible-galaxy collection list 2>/dev/null || true)"
   for name in ansible.posix community.general community.sops; do
     key="${name//./_}_version"
-    version="$(python3 "${SCRIPT_DIR}/ci/yaml_versions.py" get "${key}" "${SCRIPT_DIR}/versions.yml")"
+    version="$(pin "${key}")"
     if ! printf '%s\n' "${installed}" | awk -v n="${name}" -v v="${version}" '$1 == n && $2 == v { found = 1 } END { exit !found }'; then
       specs+=("${name}:${version}")
     fi
@@ -260,7 +260,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_linux_x86_64
+# The Linux x86_64 requirement applies to the managed host (preflight role);
+# this control machine only needs ansible-playbook, sops and SSH.
 check_sops_prerequisites
 ensure_ansible
 ensure_collections

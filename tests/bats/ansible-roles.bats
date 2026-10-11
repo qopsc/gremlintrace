@@ -785,3 +785,45 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
+
+@test "hugepages allocator honours a reserved-RAM floor so the host stack keeps memory" {
+  script="${REPO_ROOT}/ansible/roles/e2b_host/files/e2b-allocate-hugepages.sh"
+  fake="${BATS_TMPDIR}/proc-reserve"
+  mkdir -p "${fake}/sys/vm"
+  cat >"${fake}/meminfo" <<'EOF'
+MemTotal:       32768000 kB
+Hugepagesize:       2048 kB
+EOF
+  echo 0 >"${fake}/sys/vm/nr_hugepages"
+  echo 0 >"${fake}/sys/vm/nr_overcommit_hugepages"
+  # 32000 MiB total; upstream reserve would be max(4096, 16%)=5120 MiB. A 12288 MiB
+  # floor leaves 19712 MiB -> 9856 pages -> 80/20 split = 7884 / 1971.
+  run env E2B_HUGEPAGES_PERCENTAGE=80 E2B_HUGEPAGES_RESERVED_RAM_MB=12288 \
+    E2B_HUGEPAGES_MEMINFO="${fake}/meminfo" \
+    E2B_HUGEPAGES_NR_HUGEPAGES="${fake}/sys/vm/nr_hugepages" \
+    E2B_HUGEPAGES_NR_OVERCOMMIT="${fake}/sys/vm/nr_overcommit_hugepages" \
+    bash "${script}"
+  echo "${output}"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${fake}/sys/vm/nr_hugepages")" = "7884" ]
+  [ "$(cat "${fake}/sys/vm/nr_overcommit_hugepages")" = "1971" ]
+  # the unit carries the operator value and group_vars documents it
+  render_with_defaults ansible/roles/e2b_host/templates/e2b-hugepages.service.j2 '{"e2b_hugepages_reserved_ram_mb":16384}' \
+    | grep -q '^Environment=E2B_HUGEPAGES_RESERVED_RAM_MB=16384$'
+  grep -Eq '^e2b_hugepages_reserved_ram_mb:[[:space:]]*[0-9]+' "${REPO_ROOT}/ansible/group_vars/all.yml"
+}
+
+@test "preflight still runs under --check so operators can dry-run before install" {
+  run python3 - "${REPO_ROOT}/ansible/roles/preflight/tasks/main.yml" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+run = next(t for t in tasks if "run-preflight.sh" in str(t.get("ansible.builtin.command", {}).get("cmd", "")))
+install = next(t for t in tasks if "run-preflight.sh" in str(t.get("ansible.builtin.copy", {}).get("src", "")) or "run-preflight.sh" in str(t.get("loop", "")))
+# Otherwise --check skips the command, and the slurp of the absent report fails.
+assert run.get("check_mode") is False, "run task must set check_mode: false"
+assert install.get("check_mode") is False, "helper install must set check_mode: false"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
