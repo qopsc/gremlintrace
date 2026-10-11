@@ -732,6 +732,15 @@ for t in tasks:
     assert not (name.endswith("nftables") and svc.get("enabled") is True and "qops" not in name), t["name"]
     li = t.get("ansible.builtin.lineinfile", {})
     assert "nftables.conf" not in str(li.get("path", "")), "must not include the ruleset from the distro config"
+# hosts that ran the earlier revision still have the distro unit enabled;
+# disable it (never stop it: its ExecStop flushes the whole ruleset).
+distro = [t for t in tasks for mod in ("ansible.builtin.systemd_service", "ansible.builtin.systemd", "ansible.builtin.service")
+          if str((t.get(mod) or {}).get("name", "")) in ("nftables", "nftables.service")]
+assert distro, "distro nftables.service is never disabled"
+for t in distro:
+    svc = t.get("ansible.builtin.systemd_service") or t.get("ansible.builtin.systemd") or t.get("ansible.builtin.service")
+    assert svc.get("enabled") is False, t["name"]
+    assert svc.get("state") in (None, "started"), "must not stop nftables.service (ExecStop flushes Docker/orchestrator tables)"
 units = [t for t in tasks if "qops-nftables.service" in str(t.get("ansible.builtin.template", {}).get("dest", ""))]
 assert units, "no qops-nftables.service unit template task"
 enable = [t for t in tasks if "qops-nftables" in str((t.get("ansible.builtin.systemd_service") or t.get("ansible.builtin.systemd") or t.get("ansible.builtin.service") or {}).get("name", ""))]

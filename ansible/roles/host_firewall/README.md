@@ -1,6 +1,6 @@
 # host_firewall
 
-Host nftables input policy for codereviewer. Manages only the `qops_filter` table; Docker and orchestrator tables are never flushed by this role or by its boot unit (`qops-nftables.service`, a oneshot without `ExecStop`). The distro `nftables.service` is deliberately **not** enabled: Ubuntu's `/etc/nftables.conf` starts with `flush ruleset` and that unit's stop action flushes everything. Operators must not enable it on a codereviewer host.
+Host nftables input policy for codereviewer. Manages only the `qops_filter` table; Docker and orchestrator tables are never flushed by this role or by its boot unit (`qops-nftables.service`, a oneshot without `ExecStop`). The distro `nftables.service` is deliberately **not** enabled: Ubuntu's `/etc/nftables.conf` starts with `flush ruleset` and that unit's stop action flushes everything. The role disables it (hosts installed by an earlier revision had it enabled) but never stops it, since stopping is the flush being avoided. Operators must not enable it on a codereviewer host.
 
 ## Policy
 

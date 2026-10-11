@@ -35,7 +35,9 @@
 # with `flush ruleset` and the unit's ExecStop flushes the whole ruleset, which
 # would drop Docker's NAT and the orchestrator's per-sandbox rules on any
 # restart (package upgrade, operator reload). Earlier revisions appended an
-# include there and enabled that service; both are reverted here.
+# include there and enabled that service: the include is removed and the unit
+# is disabled below. It is never stopped, because stopping it is exactly the
+# flush this role avoids; a disabled-but-running unit is harmless until reboot.
 - name: Remove qops include from the distro nftables config
   ansible.builtin.lineinfile:
     path: "{{ item }}"
@@ -45,6 +47,18 @@
     - /etc/nftables.conf
     - /etc/sysconfig/nftables.conf
   failed_when: false
+  tags:
+    - host_firewall
+
+- name: Disable the distro nftables.service without stopping it
+  ansible.builtin.systemd_service:
+    name: nftables.service
+    enabled: false
+  register: host_firewall_distro_nftables
+  # Minimal images may not ship the unit at all; that is fine.
+  failed_when:
+    - host_firewall_distro_nftables is failed
+    - "'Could not find the requested service' not in (host_firewall_distro_nftables.msg | default(''))"
   tags:
     - host_firewall
 
