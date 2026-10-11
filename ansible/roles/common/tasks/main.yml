@@ -18,6 +18,28 @@
   tags:
     - common
 
+# net.netfilter.nf_conntrack_max only exists once nf_conntrack is loaded.
+# systemd-sysctl runs before Docker loads it at boot, and on first install the
+# module is not loaded yet either, so persist and load it before the sysctl.
+- name: Persist nf_conntrack module load
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/qops-nf-conntrack.conf
+    content: |
+      # Managed by codereviewer common role: needed for net.netfilter.nf_conntrack_max.
+      nf_conntrack
+    owner: root
+    group: root
+    mode: "0644"
+  tags:
+    - common
+
+- name: Load nf_conntrack now
+  community.general.modprobe:
+    name: nf_conntrack
+    state: present
+  tags:
+    - common
+
 - name: Deploy sysctl configuration
   ansible.builtin.template:
     src: 99-qops-sysctl.conf.j2
