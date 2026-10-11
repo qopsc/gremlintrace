@@ -17,12 +17,12 @@ Host prep for Firecracker: nbd, hugetlbfs, swap, `/orchestrator`, and mirrored F
 
 `e2b-hugepages.service` (before `docker.service`) runs `/usr/local/lib/qops/e2b-allocate-hugepages.sh` with `E2B_HUGEPAGES_PERCENTAGE` from `e2b_hugepages_percentage` (default **80**).
 
-After reserving normal RAM (upstream `init-client.sh` algorithm), the script sets:
+After reserving normal RAM (upstream `init-client.sh` algorithm, raised to at least `E2B_HUGEPAGES_RESERVED_RAM_MB` from `e2b_hugepages_reserved_ram_mb`, default **12288** MiB, so Docker, Kodus and the datastores keep a budget on a 32 GiB host), the script sets:
 
 - `vm.nr_hugepages` = `percentage`% of the computable hugepage count (permanent pool)
 - `vm.nr_overcommit_hugepages` = `(100 - percentage)`% (overcommit pool)
 
-Page size is read from `/proc/meminfo` `Hugepagesize`. The script reads back both sysctls and fails on allocation shortfall. **Re-run determinism on a live host is unverified** (fragmentation can reduce what the kernel grants).
+Page size is read from `/proc/meminfo` `Hugepagesize`. The script reads back both sysctls and fails on allocation shortfall, and exits 1 when the reserve leaves no RAM for hugepages (hosts smaller than the reserve must lower `e2b_hugepages_reserved_ram_mb`; the CI matrix leg sets 3072 for its 7 GB runner). **Re-run determinism on a live host is unverified** (fragmentation can reduce what the kernel grants).
 
 ## Orchestrator storage
 

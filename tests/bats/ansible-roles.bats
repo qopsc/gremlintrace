@@ -842,3 +842,20 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }
+
+@test "CI matrix overrides the hugepage reserve so a 7 GB runner can still allocate" {
+  run python3 - "${REPO_ROOT}" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+ci = yaml.safe_load((root / "ci/matrix/group_vars/codereviewer.yml").read_text())
+gv = yaml.safe_load((root / "ansible/group_vars/all.yml").read_text())
+assert gv["e2b_hugepages_reserved_ram_mb"] >= ci["preflight_min_ram_mb"], "production floor would fit a CI runner; test is moot"
+assert "e2b_hugepages_reserved_ram_mb" in ci, "CI leg inherits the production floor and the allocator exits 1"
+assert ci["e2b_hugepages_reserved_ram_mb"] <= ci["preflight_min_ram_mb"] // 2, ci["e2b_hugepages_reserved_ram_mb"]
+readme = (root / "ansible/roles/e2b_host/README.md").read_text()
+assert "e2b_hugepages_reserved_ram_mb" in readme, "role README does not document the floor"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}

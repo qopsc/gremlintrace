@@ -12,6 +12,10 @@ tls_key_path: /etc/qops/ci-tls/tls.key
 preflight_min_vcpus: 2
 preflight_min_ram_mb: 7000
 preflight_min_disk_gb: 30
+# The production hugepage reserve floor (e2b_hugepages_reserved_ram_mb, 12 GiB)
+# exceeds the whole runner, so e2b-allocate-hugepages.sh would exit 1. Keep this
+# at or below half of preflight_min_ram_mb.
+e2b_hugepages_reserved_ram_mb: 3072
 
 # qops_public_ipv4 / qops_lan_ipv4 are set at runtime from /etc/qops/ci-matrix.env
 # (prepare-host.sh discovers the runner address and a RFC1918 LAN probe target).
