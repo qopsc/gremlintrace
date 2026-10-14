@@ -10,6 +10,7 @@ Operator and developer documentation for codereviewer.
 | [security.md](security.md) | Root services, secrets, threat model |
 | [spike-notes.md](spike-notes.md) | Phase 0 gate checklist (**unchecked**) |
 | [distro-notes/ubuntu-24.04.md](distro-notes/ubuntu-24.04.md) | M1 Ubuntu support |
+| [PAUSED.md](PAUSED.md) | Paused and outstanding work: blockers, proof owed, deferred findings, operator setup, M2 backlog |
 
 Authoritative design spec: [superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md](superpowers/specs/2026-08-28-kodus-e2b-selfhost-design.md).
 
