@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "qopsc/gremlintrace: patch, minor and digest updates automerge after CI; majors wait for approval on the dependency dashboard. versions.yml and e2b/e2b.pin are owned by the monthly pin-bump.yml workflow (Renovate has no manager for them, and is told to leave them alone).",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "timezone": "UTC",
+  "schedule": ["every weekend"],
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 10,
+  "dependencyDashboard": true,
+  "labels": ["deps"],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": { "schedule": ["at any time"], "addLabels": ["security"] },
+  "platformAutomerge": false,
+  "ignorePaths": ["versions.yml", "e2b/e2b.pin"],
+  "packageRules": [
+    {
+      "description": "Majors wait for approval on the dependency dashboard",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Patch, minor and digest updates merge themselves once CI is green",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "automerge": true
+    }
+  ]
+}
