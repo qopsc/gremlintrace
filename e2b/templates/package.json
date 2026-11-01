@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "e2b": "2.46.1"
+    "e2b": "2.62.0"
   },
   "devDependencies": {
     "@types/node": "22.18.12",
